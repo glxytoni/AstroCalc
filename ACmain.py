@@ -11,7 +11,7 @@ def open_photon_energy_spectrum():
 
 def open_parallaxe_distance():
     parallaxe_distance_window = tk.Toplevel(root)
-    mfc.parallaxe_distance_UI(parallaxe_distance_window)
+    mfc.parallaxe_distance_UI2(parallaxe_distance_window)
 
 def open_schwarzschild_radius():
     schwarzschild_radius_window = tk.Toplevel(root)
