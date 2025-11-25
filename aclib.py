@@ -164,6 +164,65 @@ def parallaxe_distance_UI(root):
 
 
 
+def parallaxe_distance_UI2(root):
+
+    # Clear non-menu widgets
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu"]:
+            widget.destroy()
+
+    # Fetch constants from the dictionary
+    pi  = SOLAR_SYSTEM["constants"]["pi"]
+    AU  = SOLAR_SYSTEM["constants"]["AU"]
+    ly  = SOLAR_SYSTEM["constants"]["ly"]
+    psc = SOLAR_SYSTEM["constants"]["parsec"]
+
+    # Clear again except menus + buttons
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+    def calculate(*args):
+        try:
+            ro = float(roi.get())
+        except ValueError:
+            result_label.config(text="Error: Invalid input, please enter a number.")
+            return
+
+        # parallax formula
+        r = AU / ((pi / 180) * (ro / 3600))
+
+        result_label.config(
+            text=f"Estimated Distance\n"
+                 f"----------------------\n"
+                 f"[Ly]:   {r / ly:.3f}\n"
+                 f"[Pc]:   {r / psc:.3f}\n"
+                 f"[Mpc]:  {r / (psc * 1e6):.3f}\n"
+        )
+
+    frame = tk.Frame(root, width=1000, height=600)
+    frame.pack()
+
+    input_frame = tk.Frame(frame)
+    input_frame.pack(pady=20)
+
+    par_label = tk.Label(input_frame, text="Enter Parallax in [arc sec]")
+    par_label.pack(side=tk.LEFT)
+
+    roi = tk.Entry(input_frame)
+    roi.pack(side=tk.LEFT)
+    roi.bind("<Return>", calculate)
+
+    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
+    calculate_button.pack(side=tk.LEFT, padx=10)
+
+    result_label = tk.Label(frame, justify=tk.LEFT)
+    result_label.pack(pady=50)
+
+
+
+
+
 def photon_energy(wavelength):
     h = 6.62607015e-34  # Planck's constant in J s
     c = 299792458  # speed of light in m/s
