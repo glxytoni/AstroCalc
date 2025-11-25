@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import font
 
+
 solarradius = 6.69e8  # meter
 solarmass = 1.988e30  # kg
 gravsun = 274  # m/s**2
@@ -24,19 +25,96 @@ psc = 3.086e16  # meter
 h = 6.626e-34  # Js = 4.1357e-15 eVs
 theta = 5.6704e-8  # Stefan-Boltzmann
 bW = 2.8978e-3
+eV = 1.602176634e-19  # 1 eV in Joules
 H01 = 72
 H02 = 67
 
+SOLAR_SYSTEM = {
+"""
+    "constants": {
+        "G":            6.6741e-11,      # gravitational constant (m^3 / kg / s^2)
+        "pi":           3.141592653589793,
+        "AU":           1.495978707e11,  # meter
+        "c":            2.9979e8,        # m/s
+        "ly":           9.461e15,        # meter
+        "parsec":       3.086e16,        # meter
+        "h":            6.626e-34,       # J*s
+        "sigma":        5.6704e-8,       # Stefan-Boltzmann (W/m^2/K^4)
+        "bWien":        2.8978e-3,       # Wien displacement constant (m*K)
+
+        # Hubble parameter examples you had
+        "H01":          72,
+        "H02":          67
+    },
+"""
+    "sun": {
+        "radius":       6.69e8,          # meter
+        "mass":         1.988e30,        # kg
+        "gravity":      274,             # m/s^2 at surface
+        "solar_constant": 1367,          # W/m^2 at 1 AU
+        "luminosity":   3.828e26         # W
+    },
+
+    # --- Planets ---
+    "mercury": {
+        "radius":       2.4397e6,        # m
+        "mass":         3.3011e23,       # kg
+        "gravity":      3.7              # m/s^2
+    },
+
+    "venus": {
+        "radius":       6.0518e6,        # m
+        "mass":         4.8675e24,       # kg
+        "gravity":      8.87             # m/s^2
+    },
+
+    "earth": {
+        "radius":       6.371e6,         # m
+        "mass":         5.9722e24,       # kg
+        "gravity":      9.80665,         # m/s^2
+        "eccentricity": 0.0167           # mean orbital eccentricity (you already had this)
+    },
+
+    "mars": {
+        "radius":       3.3895e6,        # m
+        "mass":         6.4171e23,       # kg
+        "gravity":      3.72076          # m/s^2
+    },
+
+    "jupiter": {
+        "radius":       6.9911e7,        # m
+        "mass":         1.8982e27,       # kg
+        "gravity":      24.79            # m/s^2
+    },
+
+    "saturn": {
+        "radius":       5.8232e7,        # m
+        "mass":         5.6834e26,       # kg
+        "gravity":      10.44            # m/s^2
+    },
+
+    "uranus": {
+        "radius":       2.5362e7,        # m
+        "mass":         8.6810e25,       # kg
+        "gravity":      8.69             # m/s^2
+    },
+
+    "neptune": {
+        "radius":       2.4622e7,        # m
+        "mass":         1.02413e26,      # kg
+        "gravity":      11.15            # m/s^2
+    }
+}
+
+
+
+"""
 def parallaxe_distance_UI(root):
 
     for widget in root.winfo_children():
         if widget.winfo_class() not in ["Menu"]:
             widget.destroy()
 
-
-
-    pi = math.pi
-    AU = 1.49598e11  # meter
 
 
     for widget in root.winfo_children():
@@ -77,14 +155,65 @@ def parallaxe_distance_UI(root):
 
     result_label = tk.Label(frame, justify=tk.LEFT)
     result_label.pack(pady=50)
+"""
+
+
+
+def parallaxe_distance_UI2(root):
+
+    # Clear non-menu widgets
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu"]:
+            widget.destroy()
+
+
+    # Clear again except menus + buttons
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+    def calculate(*args):
+        try:
+            ro = float(roi.get())
+        except ValueError:
+            result_label.config(text="Error: Invalid input, please enter a number.")
+            return
+
+        # parallax formula
+        r = AU / ((pi / 180) * (ro / 3600))
+
+        result_label.config(
+            text=f"Estimated Distance\n"
+                 f"----------------------\n"
+                 f"[Ly]:   {r / ly:.3f}\n"
+                 f"[Pc]:   {r / psc:.3f}\n"
+                 f"[Mpc]:  {r / (psc * 1e6):.3f}\n"
+        )
+
+    frame = tk.Frame(root, width=1000, height=600)
+    frame.pack()
+
+    input_frame = tk.Frame(frame)
+    input_frame.pack(pady=20)
+
+    par_label = tk.Label(input_frame, text="Enter Parallax in [arc sec]")
+    par_label.pack(side=tk.LEFT)
+
+    roi = tk.Entry(input_frame)
+    roi.pack(side=tk.LEFT)
+    roi.bind("<Return>", calculate)
+
+    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
+    calculate_button.pack(side=tk.LEFT, padx=10)
+
+    result_label = tk.Label(frame, justify=tk.LEFT)
+    result_label.pack(pady=50)
+
 
 
 
 
 def photon_energy(wavelength):
-    h = 6.62607015e-34  # Planck's constant in J s
-    c = 299792458  # speed of light in m/s
-    eV = 1.602176634e-19  # 1 eV in Joules
 
     frequency = c / wavelength  # calculate frequency of photon
     energy_J = h * frequency  # calculate energy in Joules
@@ -271,9 +400,7 @@ def schwarzschild_radius_UI2(root):
                 f"[R☉]: {radius / 6.957e8:.2f} R☉\n"
             )
 
-    # define constants
-    G = 6.67430 * 10 ** -11  # Gravitational constant in m^3/kg s^2
-    c = 299792458  # Speed of light in m/s
+
     M_min = 2.2 * 10 ** -8  # Minimum mass in kg
 
     frame = tk.Frame(root, width=500, height=500)

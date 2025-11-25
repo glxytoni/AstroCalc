@@ -9,4 +9,3 @@ It’s built for speed, simplicity, and practical use — no giant libraries req
 - Coordinate conversions (RA/Dec, Alt/Az)
 - Time conversions (Julian date, sidereal time)
 - Small-body / planet data lookups
-
