@@ -27,6 +27,89 @@ bW = 2.8978e-3
 H01 = 72
 H02 = 67
 
+SOLAR_SYSTEM = {
+    "constants": {
+        "G":            6.6741e-11,      # gravitational constant (m^3 / kg / s^2)
+        "pi":           3.141592653589793,
+        "AU":           1.495978707e11,  # meter
+        "c":            2.9979e8,        # m/s
+        "ly":           9.461e15,        # meter
+        "parsec":       3.086e16,        # meter
+        "h":            6.626e-34,       # J*s
+        "sigma":        5.6704e-8,       # Stefan-Boltzmann (W/m^2/K^4)
+        "bWien":        2.8978e-3,       # Wien displacement constant (m*K)
+
+        # Hubble parameter examples you had
+        "H01":          72,
+        "H02":          67
+    },
+
+    "sun": {
+        "radius":       6.69e8,          # meter
+        "mass":         1.988e30,        # kg
+        "gravity":      274,             # m/s^2 at surface
+        "solar_constant": 1367,          # W/m^2 at 1 AU
+        "luminosity":   3.828e26         # W
+    },
+
+    # --- Planets ---
+    "mercury": {
+        "radius":       2.4397e6,        # m
+        "mass":         3.3011e23,       # kg
+        "gravity":      3.7              # m/s^2
+    },
+
+    "venus": {
+        "radius":       6.0518e6,        # m
+        "mass":         4.8675e24,       # kg
+        "gravity":      8.87             # m/s^2
+    },
+
+    "earth": {
+        "radius":       6.371e6,         # m
+        "mass":         5.9722e24,       # kg
+        "gravity":      9.80665,         # m/s^2
+        "eccentricity": 0.0167           # mean orbital eccentricity (you already had this)
+    },
+
+    "mars": {
+        "radius":       3.3895e6,        # m
+        "mass":         6.4171e23,       # kg
+        "gravity":      3.72076          # m/s^2
+    },
+
+    "jupiter": {
+        "radius":       6.9911e7,        # m
+        "mass":         1.8982e27,       # kg
+        "gravity":      24.79            # m/s^2
+    },
+
+    "saturn": {
+        "radius":       5.8232e7,        # m
+        "mass":         5.6834e26,       # kg
+        "gravity":      10.44            # m/s^2
+    },
+
+    "uranus": {
+        "radius":       2.5362e7,        # m
+        "mass":         8.6810e25,       # kg
+        "gravity":      8.69             # m/s^2
+    },
+
+    "neptune": {
+        "radius":       2.4622e7,        # m
+        "mass":         1.02413e26,      # kg
+        "gravity":      11.15            # m/s^2
+    }
+}
+
+
+
+
+
+
+
+
 def parallaxe_distance_UI(root):
 
     for widget in root.winfo_children():
