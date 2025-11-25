@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import font
 
+
 solarradius = 6.69e8  # meter
 solarmass = 1.988e30  # kg
 gravsun = 274  # m/s**2
@@ -24,10 +25,12 @@ psc = 3.086e16  # meter
 h = 6.626e-34  # Js = 4.1357e-15 eVs
 theta = 5.6704e-8  # Stefan-Boltzmann
 bW = 2.8978e-3
+eV = 1.602176634e-19  # 1 eV in Joules
 H01 = 72
 H02 = 67
 
 SOLAR_SYSTEM = {
+"""
     "constants": {
         "G":            6.6741e-11,      # gravitational constant (m^3 / kg / s^2)
         "pi":           3.141592653589793,
@@ -43,7 +46,7 @@ SOLAR_SYSTEM = {
         "H01":          72,
         "H02":          67
     },
-
+"""
     "sun": {
         "radius":       6.69e8,          # meter
         "mass":         1.988e30,        # kg
@@ -105,21 +108,13 @@ SOLAR_SYSTEM = {
 
 
 
-
-
-
-
-
+"""
 def parallaxe_distance_UI(root):
 
     for widget in root.winfo_children():
         if widget.winfo_class() not in ["Menu"]:
             widget.destroy()
 
-
-
-    pi = math.pi
-    AU = 1.49598e11  # meter
 
 
     for widget in root.winfo_children():
@@ -160,7 +155,7 @@ def parallaxe_distance_UI(root):
 
     result_label = tk.Label(frame, justify=tk.LEFT)
     result_label.pack(pady=50)
-
+"""
 
 
 
@@ -171,11 +166,6 @@ def parallaxe_distance_UI2(root):
         if widget.winfo_class() not in ["Menu"]:
             widget.destroy()
 
-    # Fetch constants from the dictionary
-    pi  = SOLAR_SYSTEM["constants"]["pi"]
-    AU  = SOLAR_SYSTEM["constants"]["AU"]
-    ly  = SOLAR_SYSTEM["constants"]["ly"]
-    psc = SOLAR_SYSTEM["constants"]["parsec"]
 
     # Clear again except menus + buttons
     for widget in root.winfo_children():
@@ -224,9 +214,6 @@ def parallaxe_distance_UI2(root):
 
 
 def photon_energy(wavelength):
-    h = 6.62607015e-34  # Planck's constant in J s
-    c = 299792458  # speed of light in m/s
-    eV = 1.602176634e-19  # 1 eV in Joules
 
     frequency = c / wavelength  # calculate frequency of photon
     energy_J = h * frequency  # calculate energy in Joules
@@ -413,9 +400,7 @@ def schwarzschild_radius_UI2(root):
                 f"[R☉]: {radius / 6.957e8:.2f} R☉\n"
             )
 
-    # define constants
-    G = 6.67430 * 10 ** -11  # Gravitational constant in m^3/kg s^2
-    c = 299792458  # Speed of light in m/s
+
     M_min = 2.2 * 10 ** -8  # Minimum mass in kg
 
     frame = tk.Frame(root, width=500, height=500)
