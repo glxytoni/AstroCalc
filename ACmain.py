@@ -37,9 +37,11 @@ def open_roche_limit():
     roche_limit_window = tk.Toplevel(root)
     mfc.roche_limit_UI(roche_limit_window)
 
+"""
 def open_orbit_plot():
     orbit_plot_window = tk.Toplevel(root)
     mfc.orbit_plot_UI(orbit_plot_window)
+"""
 
 root = tk.Tk()
 root.title("Astrocalc0.3.2")
