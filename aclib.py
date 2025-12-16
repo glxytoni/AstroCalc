@@ -159,6 +159,118 @@ def parallaxe_distance_UI(root):
 
 
 
+def orbit_visualizer_UI(root):
+    # -----------------------------
+    # Clear existing UI
+    # -----------------------------
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+    # -----------------------------
+    # Inner draw function
+    # -----------------------------
+    def draw_orbit():
+        try:
+            ra = float(apo_entry.get())
+            rp = float(peri_entry.get())
+        except ValueError:
+            info_label.config(text="Error: Invalid input.")
+            return
+
+        if rp <= 0 or ra <= 0 or ra < rp:
+            info_label.config(text="Error: Require ra ≥ rp > 0")
+            return
+
+        canvas.delete("all")
+
+        # --- Orbital geometry ---
+        a = (ra + rp) / 2
+        e = (ra - rp) / (ra + rp)
+        b = a * math.sqrt(1 - e**2)
+        c = a * e
+
+        # --- Scaling ---
+        earth_orbit_km = 149_597_870
+        max_radius = max(ra, earth_orbit_km)
+        padding = 40
+        scale = (CANVAS_SIZE / 2 - padding) / max_radius
+
+        cx = CANVAS_SIZE / 2
+        cy = CANVAS_SIZE / 2
+
+        # --- Sun ---
+        sun_x = cx - c * scale
+        sun_y = cy
+        canvas.create_oval(
+            sun_x - 5, sun_y - 5,
+            sun_x + 5, sun_y + 5,
+            fill="yellow",
+            outline=""
+        )
+
+        # --- Earth reference orbit ---
+        earth_r = earth_orbit_km * scale
+        canvas.create_oval(
+            sun_x - earth_r, cy - earth_r,
+            sun_x + earth_r, cy + earth_r,
+            outline="#3399ff",
+            dash=(4, 4)
+        )
+
+        # --- Orbit ellipse ---
+        rx = a * scale
+        ry = b * scale
+        canvas.create_oval(
+            cx - rx, cy - ry,
+            cx + rx, cy + ry,
+            outline="white",
+            width=2
+        )
+
+        # --- Info text ---
+        info_label.config(
+            text=f"Eccentricity: {e:.4f}\n"
+                 f"Semi-major axis: {a/1e6:.2f} million km"
+        )
+
+    # -----------------------------
+    # UI layout
+    # -----------------------------
+    CANVAS_SIZE = 500
+
+    frame = tk.Frame(root, width=500, height=500)
+    frame.pack()
+
+    input_frame = tk.Frame(frame)
+    input_frame.pack(pady=10)
+
+    tk.Label(input_frame, text="Apoapsis [km]:").grid(row=0, column=0, sticky="e")
+    apo_entry = tk.Entry(input_frame, width=15)
+    apo_entry.grid(row=0, column=1, padx=5)
+
+    tk.Label(input_frame, text="Periapsis [km]:").grid(row=1, column=0, sticky="e")
+    peri_entry = tk.Entry(input_frame, width=15)
+    peri_entry.grid(row=1, column=1, padx=5)
+
+    draw_button = tk.Button(input_frame, text="Draw Orbit", command=draw_orbit)
+    draw_button.grid(row=0, column=2, rowspan=2, padx=10)
+
+    canvas = tk.Canvas(
+        frame,
+        width=CANVAS_SIZE,
+        height=CANVAS_SIZE,
+        bg="black"
+    )
+    canvas.pack(pady=10)
+
+    info_label = tk.Label(frame, justify=tk.LEFT)
+    info_label.pack(pady=10)
+
+    apo_entry.focus()
+
+
+
 def parallaxe_distance_UI2(root):
 
     # Clear non-menu widgets
