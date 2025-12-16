@@ -191,9 +191,29 @@ def orbit_visualizer_UI(root):
         c = a * e
 
         # --- Scaling ---
-        earth_orbit_km = 149_597_870
-        max_radius = max(ra, earth_orbit_km)
         padding = 40
+
+        # Scale ONLY to the orbit being analyzed
+        max_radius = ra
+        scale = (CANVAS_SIZE / 2 - padding) / max_radius
+
+        cx = CANVAS_SIZE / 2
+        cy = CANVAS_SIZE / 2
+
+        # Planet semi-major axes (km)
+        PLANET_ORBITS = [
+            ("Mercury", 57_909_227, "#808080"),  # grey
+            ("Venus", 108_209_475, "#FFFFF0"),  # ivory
+            ("Earth", 149_597_870, "#3399ff"),  # blue
+            ("Mars", 227_943_824, "#ff3333"),  # red
+            ("Jupiter", 778_340_821, "#ff8c00"),  # dark orange
+            ("Saturn", 1_426_666_422, "#ffa500"),  # bright orange
+            ("Uranus", 2_870_658_186, "#66ccff"),  # bright blue
+            ("Neptune", 4_498_396_441, "#00008b"),  # dark blue
+        ]
+
+        # Determine scaling from largest orbit we care about
+        max_radius = ra
         scale = (CANVAS_SIZE / 2 - padding) / max_radius
 
         cx = CANVAS_SIZE / 2
@@ -209,14 +229,15 @@ def orbit_visualizer_UI(root):
             outline=""
         )
 
-        # --- Earth reference orbit ---
-        earth_r = earth_orbit_km * scale
-        canvas.create_oval(
-            sun_x - earth_r, cy - earth_r,
-            sun_x + earth_r, cy + earth_r,
-            outline="#3399ff",
-            dash=(4, 4)
-        )
+        # --- Planet reference orbits ---
+        for name, orbit_km, color in PLANET_ORBITS:
+            r = orbit_km * scale
+            canvas.create_oval(
+                sun_x - r, sun_y - r,
+                sun_x + r, sun_y + r,
+                outline=color,
+                dash=(4, 4)
+            )
 
         # --- Orbit ellipse ---
         rx = a * scale
