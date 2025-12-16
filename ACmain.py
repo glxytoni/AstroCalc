@@ -37,9 +37,9 @@ def open_roche_limit():
     roche_limit_window = tk.Toplevel(root)
     mfc.roche_limit_UI(roche_limit_window)
 
-def open_orbit_plot():
-    orbit_plot_window = tk.Toplevel(root)
-    mfc.orbit_plot_UI(orbit_plot_window)
+def open_orbit_visualizer():
+    orbit_visualizer_window = tk.Toplevel(root)
+    mfc.orbit_visualizer_UI(orbit_visualizer_window)
 
 root = tk.Tk()
 root.title("Astrocalc0.3.2")
@@ -65,6 +65,7 @@ tools_menu.add_command(label="- Rocket DeltaV", command=open_rocket_dV)
 tools_menu.add_command(label="- Stellar Magnitude", command=open_stellar_mag)
 tools_menu.add_command(label="- Stellar Spectrum", command=open_spectral_class)
 tools_menu.add_command(label="- Roche Limit", command=open_roche_limit)
+tools_menu.add_command(label="- Orbit Visualizer", command=open_orbit_visualizer)
 
 tools_menu.add_command(label="2D Orbit Plot [WIP]")
 tools_menu.add_command(label="Orbit Analysis [WIP]")
