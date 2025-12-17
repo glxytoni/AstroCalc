@@ -40,7 +40,7 @@ def open_roche_limit():
 
 def open_orbit_visualizer():
     orbit_visualizer_window = tk.Toplevel(root)
-    mfc.orbit_visualizer_UI(orbit_visualizer_window)
+    mfc.orbit_visualizer_UI2(orbit_visualizer_window)
 
 
 
