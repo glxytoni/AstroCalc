@@ -107,59 +107,7 @@ SOLAR_SYSTEM = {
 }
 
 
-
-"""
-def parallaxe_distance_UI(root):
-
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu"]:
-            widget.destroy()
-
-
-
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
-
-    def calculate(*args):
-        try:
-            ro = float(roi.get())
-        except ValueError:
-            result_label.config(text="Error: Invalid input, please enter a number.")
-            return
-
-        r = (1 * AU) / ((pi / 180) * (ro / 3600))
-        result_label.config(text=
-                            f"Estimated Distance\n"
-                            f"----------------------\n"
-                            f"[Ly]: {r / ly:.3f}\n"
-                            f"[Pc]: {r / psc:.3f}\n"
-                            f"[Mpc]: {r / (psc * 1e6):.3f}\n"
-                            )
-
-    frame = tk.Frame(root, width=1000, height=600)
-    frame.pack()
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
-
-    mass_label = tk.Label(input_frame, text="Enter Parallaxe in [arc sec] ")
-    mass_label.pack(side=tk.LEFT)
-
-    roi = tk.Entry(input_frame)
-    roi.pack(side=tk.LEFT)
-    roi.bind("<Return>", calculate)
-
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
-    calculate_button.pack(side=tk.LEFT, padx=10)
-
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
-"""
-
-
-
-def orbit_visualizer_UI(root):
+def orbit_visualizer_UI2(root):
     # -----------------------------
     # Clear existing UI
     # -----------------------------
@@ -167,16 +115,31 @@ def orbit_visualizer_UI(root):
         if widget.winfo_class() not in ["Menu", "Button"]:
             widget.destroy()
 
+    AU_KM = 149_597_870
+
+    # -----------------------------
+    # State
+    # -----------------------------
+    system_mode = tk.StringVar(value="Solar System")
+
     # -----------------------------
     # Inner draw function
     # -----------------------------
     def draw_orbit():
         try:
-            ra = float(apo_entry.get())
-            rp = float(peri_entry.get())
+            ra_input = float(apo_entry.get())
+            rp_input = float(peri_entry.get())
         except ValueError:
             info_label.config(text="Error: Invalid input.")
             return
+
+        # Convert units to km
+        if system_mode.get() == "Solar System":
+            ra = ra_input * AU_KM
+            rp = rp_input * AU_KM
+        else:
+            ra = ra_input
+            rp = rp_input
 
         if rp <= 0 or ra <= 0 or ra < rp:
             info_label.config(text="Error: Require ra ≥ rp > 0")
@@ -190,56 +153,62 @@ def orbit_visualizer_UI(root):
         b = a * math.sqrt(1 - e**2)
         c = a * e
 
-        # --- Scaling ---
+        # --- Scaling (always scale to analyzed orbit) ---
         padding = 40
-
-        # Scale ONLY to the orbit being analyzed
-        max_radius = ra
-        scale = (CANVAS_SIZE / 2 - padding) / max_radius
+        scale = (CANVAS_SIZE / 2 - padding) / ra
 
         cx = CANVAS_SIZE / 2
         cy = CANVAS_SIZE / 2
 
-        # Planet semi-major axes (km)
-        PLANET_ORBITS = [
-            ("Mercury", 57_909_227, "#808080"),  # grey
-            ("Venus", 108_209_475, "#FFFFF0"),  # ivory
-            ("Earth", 149_597_870, "#3399ff"),  # blue
-            ("Mars", 227_943_824, "#ff3333"),  # red
-            ("Jupiter", 778_340_821, "#ff8c00"),  # dark orange
-            ("Saturn", 1_426_666_422, "#ffa500"),  # bright orange
-            ("Uranus", 2_870_658_186, "#66ccff"),  # bright blue
-            ("Neptune", 4_498_396_441, "#00008b"),  # dark blue
-        ]
+        # -----------------------------
+        # System definitions
+        # -----------------------------
+        if system_mode.get() == "Solar System":
+            central_color = "yellow"
+            reference_orbits = [
+                ("Mercury",  57_909_227,  "#808080"),
+                ("Venus",   108_209_475,  "#FFFFF0"),
+                ("Earth",   149_597_870,  "#3399ff"),
+                ("Mars",    227_943_824,  "#ff3333"),
+                ("Jupiter", 778_340_821,  "#ff8c00"),
+                ("Saturn", 1_426_666_422, "#ffa500"),
+                ("Uranus", 2_870_658_186, "#66ccff"),
+                ("Neptune",4_498_396_441, "#00008b"),
+            ]
+        else:
+            central_color = "#3399ff"  # Earth
+            reference_orbits = [
+                ("Moon", 384_400, "#cccccc")
+            ]
 
-        # Determine scaling from largest orbit we care about
-        max_radius = ra
-        scale = (CANVAS_SIZE / 2 - padding) / max_radius
+        # -----------------------------
+        # Central body
+        # -----------------------------
+        focus_x = cx - c * scale
+        focus_y = cy
 
-        cx = CANVAS_SIZE / 2
-        cy = CANVAS_SIZE / 2
-
-        # --- Sun ---
-        sun_x = cx - c * scale
-        sun_y = cy
         canvas.create_oval(
-            sun_x - 5, sun_y - 5,
-            sun_x + 5, sun_y + 5,
-            fill="yellow",
+            focus_x - 5, focus_y - 5,
+            focus_x + 5, focus_y + 5,
+            fill=central_color,
             outline=""
         )
 
-        # --- Planet reference orbits ---
-        for name, orbit_km, color in PLANET_ORBITS:
+        # -----------------------------
+        # Reference orbits
+        # -----------------------------
+        for _, orbit_km, color in reference_orbits:
             r = orbit_km * scale
             canvas.create_oval(
-                sun_x - r, sun_y - r,
-                sun_x + r, sun_y + r,
+                focus_x - r, focus_y - r,
+                focus_x + r, focus_y + r,
                 outline=color,
                 dash=(4, 4)
             )
 
-        # --- Orbit ellipse ---
+        # -----------------------------
+        # Actual orbit
+        # -----------------------------
         rx = a * scale
         ry = b * scale
         canvas.create_oval(
@@ -249,45 +218,81 @@ def orbit_visualizer_UI(root):
             width=2
         )
 
-        # --- Info text ---
+        # -----------------------------
+        # Output text
+        # -----------------------------
+        if system_mode.get() == "Solar System":
+            a_str = f"{a / AU_KM:.3f} AU"
+        else:
+            a_str = f"{a:,.0f} km"
+
         info_label.config(
-            text=f"Eccentricity: {e:.4f}\n"
-                 f"Semi-major axis: {a/1e6:.2f} million km"
+            text=f"System: {system_mode.get()}\n"
+                 f"Eccentricity: {e:.4f}\n"
+                 f"Semi-major axis: {a_str}"
         )
+
+    # -----------------------------
+    # Update input units on mode change
+    # -----------------------------
+    def update_units(*args):
+        if system_mode.get() == "Solar System":
+            apo_label.config(text="Apoapsis [AU]:")
+            peri_label.config(text="Periapsis [AU]:")
+        else:
+            apo_label.config(text="Apoapsis [km]:")
+            peri_label.config(text="Periapsis [km]:")
+
+    system_mode.trace_add("write", update_units)
 
     # -----------------------------
     # UI layout
     # -----------------------------
     CANVAS_SIZE = 500
 
-    frame = tk.Frame(root, width=500, height=500)
+    frame = tk.Frame(root)
     frame.pack()
+
+    mode_frame = tk.Frame(frame)
+    mode_frame.pack(pady=5)
+
+    tk.Label(mode_frame, text="System:").pack(side=tk.LEFT)
+
+    tk.OptionMenu(
+        mode_frame,
+        system_mode,
+        "Solar System",
+        "Earth–Moon System"
+    ).pack(side=tk.LEFT)
 
     input_frame = tk.Frame(frame)
     input_frame.pack(pady=10)
 
-    tk.Label(input_frame, text="Apoapsis [km]:").grid(row=0, column=0, sticky="e")
-    apo_entry = tk.Entry(input_frame, width=15)
-    apo_entry.grid(row=0, column=1, padx=5)
+    peri_label = tk.Label(input_frame)
+    peri_label.grid(row=0, column=0, sticky="e")
 
-    tk.Label(input_frame, text="Periapsis [km]:").grid(row=1, column=0, sticky="e")
     peri_entry = tk.Entry(input_frame, width=15)
-    peri_entry.grid(row=1, column=1, padx=5)
+    peri_entry.grid(row=0, column=1, padx=5)
 
-    draw_button = tk.Button(input_frame, text="Draw Orbit", command=draw_orbit)
-    draw_button.grid(row=0, column=2, rowspan=2, padx=10)
+    apo_label = tk.Label(input_frame)
+    apo_label.grid(row=1, column=0, sticky="e")
 
-    canvas = tk.Canvas(
-        frame,
-        width=CANVAS_SIZE,
-        height=CANVAS_SIZE,
-        bg="black"
-    )
+    apo_entry = tk.Entry(input_frame, width=15)
+    apo_entry.grid(row=1, column=1, padx=5)
+
+    tk.Button(
+        input_frame,
+        text="Draw Orbit",
+        command=draw_orbit
+    ).grid(row=0, column=2, rowspan=2, padx=10)
+
+    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
     canvas.pack(pady=10)
 
     info_label = tk.Label(frame, justify=tk.LEFT)
     info_label.pack(pady=10)
 
+    update_units()
     apo_entry.focus()
 
 
