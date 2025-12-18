@@ -106,60 +106,235 @@ SOLAR_SYSTEM = {
     }
 }
 
+#=====  Backend shi ===========================================
+
+def draw_central_body(canvas, cx, cy, body_radius_m,  scale, color, min_px=4, max_px=160):
+
+    """
+       Draw central body with physically-scaled radius,
+       clamped to remain visible.
+       """
+
+    r_px = body_radius_m * scale
+
+    # Clamp for usability
+    r_px = max(min_px, min(max_px, r_px))
+
+    canvas.create_oval(
+        cx - r_px, cy - r_px,
+        cx + r_px, cy + r_px,
+        fill=color,
+        outline=""
+    )
 
 
-"""
-def parallaxe_distance_UI(root):
-
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu"]:
-            widget.destroy()
+def compute_orbit_scale(canvas_size, radii, padding=30):
+    max_r = max(radii)
+    return (canvas_size / 2 - padding) / max_r
 
 
+def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
+                      color="white", width=2, dashed=False):
+
+    if a <= 0 or e >= 1:
+        return
+
+    b = a * math.sqrt(1 - e**2)
+    c = a * e
+
+    x0 = cx - (a - c) * scale
+    y0 = cy - b * scale
+    x1 = cx + (a + c) * scale
+    y1 = cy + b * scale
+
+    canvas.create_oval(
+        x0, y0, x1, y1,
+        outline=color,
+        width=width,
+        dash=(4, 4) if dashed else None
+    )
+
+
+def draw_reference_orbits(canvas, mode, scale, cx, cy):
+    AU = 1.495978707e11
+    moon_orbit = 384_400_000
+
+    solar_orbits = [
+        0.387 * AU,
+        0.723 * AU,
+        1.000 * AU,
+        1.524 * AU,
+        5.203 * AU,
+        9.537 * AU,
+        19.191 * AU,
+        30.070 * AU,
+    ]
+
+    if mode == "solar":
+        for r in solar_orbits:
+            canvas.create_oval(
+                cx - r * scale,
+                cy - r * scale,
+                cx + r * scale,
+                cy + r * scale,
+                outline="#555555",
+                dash=(3, 3)
+            )
+
+    elif mode == "earth_moon":
+        canvas.create_oval(
+            cx - moon_orbit * scale,
+            cy - moon_orbit * scale,
+            cx + moon_orbit * scale,
+            cy + moon_orbit * scale,
+            outline="#555555",
+            dash=(3, 3)
+        )
+
+#====================================================================================
+
+
+def hohmann_transfer_UI3(root):
+    import tkinter as tk
+    import math
 
     for widget in root.winfo_children():
         if widget.winfo_class() not in ["Menu", "Button"]:
             widget.destroy()
 
-    def calculate(*args):
-        try:
-            ro = float(roi.get())
-        except ValueError:
-            result_label.config(text="Error: Invalid input, please enter a number.")
-            return
+    bodies = {
+        "Earth": (3.986004418e14, 6.371e6),
+        "Moon": (4.9048695e12, 1.7374e6),
+        "Mars": (4.282837e13, 3.3895e6),
+        "Venus": (3.24859e14, 6.0518e6),
+        "Sun": (1.32712440018e20, 6.9634e8),
+    }
 
-        r = (1 * AU) / ((pi / 180) * (ro / 3600))
-        result_label.config(text=
-                            f"Estimated Distance\n"
-                            f"----------------------\n"
-                            f"[Ly]: {r / ly:.3f}\n"
-                            f"[Pc]: {r / psc:.3f}\n"
-                            f"[Mpc]: {r / (psc * 1e6):.3f}\n"
-                            )
+    selected_body = tk.StringVar(value="Earth")
 
-    frame = tk.Frame(root, width=1000, height=600)
-    frame.pack()
+    frame = tk.Frame(root)
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    body_frame = tk.Frame(frame)
+    body_frame.pack(anchor="w")
+
+    tk.Label(body_frame, text="Central body: ").pack(side=tk.LEFT)
+    tk.OptionMenu(body_frame, selected_body, *bodies.keys()).pack(side=tk.LEFT)
 
     input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
+    input_frame.pack(anchor="w", pady=10)
 
-    mass_label = tk.Label(input_frame, text="Enter Parallaxe in [arc sec] ")
-    mass_label.pack(side=tk.LEFT)
+    labels = [
+        "Start Orbit Altitude [km]: ",
+        "Final Orbit Altitude [km]: "
+    ]
 
-    roi = tk.Entry(input_frame)
-    roi.pack(side=tk.LEFT)
-    roi.bind("<Return>", calculate)
+    entries = []
+    for text in labels:
+        row = tk.Frame(input_frame)
+        row.pack(anchor="w", pady=4)
+        tk.Label(row, text=text).pack(side=tk.LEFT)
+        e = tk.Entry(row, width=16)
+        e.pack(side=tk.LEFT)
+        entries.append(e)
 
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
-    calculate_button.pack(side=tk.LEFT, padx=10)
+    start_alt_entry, final_alt_entry = entries
 
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
-"""
+    CANVAS_SIZE = 420
+    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
+    canvas.pack(pady=10)
+
+    result_label = tk.Label(frame, justify=tk.LEFT, anchor="w")
+    result_label.pack(fill=tk.X, pady=6)
+
+    def calculate():
+        try:
+            h1 = float(start_alt_entry.get()) * 1000  # start altitude [m]
+            h2 = float(final_alt_entry.get()) * 1000  # final altitude [m]
+        except ValueError:
+            result_label.config(text="Error: Invalid input, please enter numeric altitudes in km.")
+            return
+
+        if h1 < 0 or h2 < 0:
+            result_label.config(text="Error: Altitudes must be >= 0.")
+            return
+
+        mu, R = bodies[selected_body.get()]
+
+        # --- Radii from central body ---
+        r1 = R + h1
+        r2 = R + h2
+
+        # --- Circular velocities ---
+        v1 = math.sqrt(mu / r1)
+        v2 = math.sqrt(mu / r2)
+
+        # --- Transfer orbit ---
+        a_t = (r1 + r2) / 2.0
+        vtp = math.sqrt(mu * (2.0 / r1 - 1.0 / a_t))
+        vta = math.sqrt(mu * (2.0 / r2 - 1.0 / a_t))
+
+        # --- Burns ---
+        dv1 = abs(vtp - v1)
+        dv2 = abs(v2 - vta)
+
+        result_label.config(text=(
+            f"Hohmann Transfer ({selected_body.get()}):\n"
+            f"ΔV₁ = {dv1 / 1000:.6f} km/s\n"
+            f"ΔV₂ = {dv2 / 1000:.6f} km/s\n"
+            f"Total ΔV = {(dv1 + dv2) / 1000:.6f} km/s"
+        ))
+
+        # ---- DRAWING ----
+        canvas.delete("all")
+        cx = cy = CANVAS_SIZE / 2
+
+        # Scale based on *largest orbit actually drawn*
+        scale = compute_orbit_scale(
+            CANVAS_SIZE,
+            [r1, r2, a_t * (1 + abs(r2 - r1) / (r2 + r1))]
+        )
+
+        mode = "solar" if selected_body.get() == "Sun" else "earth_moon"
+
+        # Pick color based on central body
+        body_color = "yellow" if mode == "solar" else "blue"
+
+        # Central body (NEW signature)
+        draw_central_body(
+            canvas,
+            cx,
+            cy,
+            R,  # physical radius in meters
+            scale,
+            "blue"
+        )
+
+        # Reference orbits
+        draw_reference_orbits(canvas, mode, scale, cx, cy)
+
+
+        # --- Start orbit (circular) ---
+        a1 = r1  # semi-major axis = radius
+        e1 = 0.0  # circular
+        draw_kepler_orbit(canvas, a1, e1, scale, cx, cy)
+
+        # --- Transfer orbit (elliptical) ---
+        a_t = (r1 + r2) / 2.0
+        e_t = abs(r2 - r1) / (r2 + r1)
+        draw_kepler_orbit(canvas, a_t, e_t, scale, cx, cy)
+
+        # --- Final orbit (circular) ---
+        a2 = r2
+        e2 = 0.0
+        draw_kepler_orbit(canvas, a2, e2, scale, cx, cy)
+
+    tk.Button(frame, text="Calculate ΔV", command=calculate).pack(pady=8)
+    start_alt_entry.focus()
 
 
 
-def orbit_visualizer_UI(root):
+def orbit_visualizer_UI2(root):
     # -----------------------------
     # Clear existing UI
     # -----------------------------
@@ -167,16 +342,31 @@ def orbit_visualizer_UI(root):
         if widget.winfo_class() not in ["Menu", "Button"]:
             widget.destroy()
 
+    AU_KM = 149_597_870
+
+    # -----------------------------
+    # State
+    # -----------------------------
+    system_mode = tk.StringVar(value="Solar System")
+
     # -----------------------------
     # Inner draw function
     # -----------------------------
     def draw_orbit():
         try:
-            ra = float(apo_entry.get())
-            rp = float(peri_entry.get())
+            ra_input = float(apo_entry.get())
+            rp_input = float(peri_entry.get())
         except ValueError:
             info_label.config(text="Error: Invalid input.")
             return
+
+        # Convert units to km
+        if system_mode.get() == "Solar System":
+            ra = ra_input * AU_KM
+            rp = rp_input * AU_KM
+        else:
+            ra = ra_input
+            rp = rp_input
 
         if rp <= 0 or ra <= 0 or ra < rp:
             info_label.config(text="Error: Require ra ≥ rp > 0")
@@ -190,35 +380,62 @@ def orbit_visualizer_UI(root):
         b = a * math.sqrt(1 - e**2)
         c = a * e
 
-        # --- Scaling ---
-        earth_orbit_km = 149_597_870
-        max_radius = max(ra, earth_orbit_km)
+        # --- Scaling (always scale to analyzed orbit) ---
         padding = 40
-        scale = (CANVAS_SIZE / 2 - padding) / max_radius
+        scale = (CANVAS_SIZE / 2 - padding) / ra
 
         cx = CANVAS_SIZE / 2
         cy = CANVAS_SIZE / 2
 
-        # --- Sun ---
-        sun_x = cx - c * scale
-        sun_y = cy
+        # -----------------------------
+        # System definitions
+        # -----------------------------
+        if system_mode.get() == "Solar System":
+            central_color = "yellow"
+            reference_orbits = [
+                ("Mercury",  57_909_227,  "#808080"),
+                ("Venus",   108_209_475,  "#FFFFF0"),
+                ("Earth",   149_597_870,  "#3399ff"),
+                ("Mars",    227_943_824,  "#ff3333"),
+                ("Jupiter", 778_340_821,  "#ff8c00"),
+                ("Saturn", 1_426_666_422, "#ffa500"),
+                ("Uranus", 2_870_658_186, "#66ccff"),
+                ("Neptune",4_498_396_441, "#00008b"),
+            ]
+        else:
+            central_color = "#3399ff"  # Earth
+            reference_orbits = [
+                ("Moon", 384_400, "#cccccc")
+            ]
+
+        # -----------------------------
+        # Central body
+        # -----------------------------
+        focus_x = cx - c * scale
+        focus_y = cy
+
         canvas.create_oval(
-            sun_x - 5, sun_y - 5,
-            sun_x + 5, sun_y + 5,
-            fill="yellow",
+            focus_x - 5, focus_y - 5,
+            focus_x + 5, focus_y + 5,
+            fill=central_color,
             outline=""
         )
 
-        # --- Earth reference orbit ---
-        earth_r = earth_orbit_km * scale
-        canvas.create_oval(
-            sun_x - earth_r, cy - earth_r,
-            sun_x + earth_r, cy + earth_r,
-            outline="#3399ff",
-            dash=(4, 4)
-        )
+        # -----------------------------
+        # Reference orbits
+        # -----------------------------
+        for _, orbit_km, color in reference_orbits:
+            r = orbit_km * scale
+            canvas.create_oval(
+                focus_x - r, focus_y - r,
+                focus_x + r, focus_y + r,
+                outline=color,
+                dash=(4, 4)
+            )
 
-        # --- Orbit ellipse ---
+        # -----------------------------
+        # Actual orbit
+        # -----------------------------
         rx = a * scale
         ry = b * scale
         canvas.create_oval(
@@ -228,47 +445,82 @@ def orbit_visualizer_UI(root):
             width=2
         )
 
-        # --- Info text ---
+        # -----------------------------
+        # Output text
+        # -----------------------------
+        if system_mode.get() == "Solar System":
+            a_str = f"{a / AU_KM:.3f} AU"
+        else:
+            a_str = f"{a:,.0f} km"
+
         info_label.config(
-            text=f"Eccentricity: {e:.4f}\n"
-                 f"Semi-major axis: {a/1e6:.2f} million km"
+            text=f"System: {system_mode.get()}\n"
+                 f"Eccentricity: {e:.4f}\n"
+                 f"Semi-major axis: {a_str}"
         )
+
+    # -----------------------------
+    # Update input units on mode change
+    # -----------------------------
+    def update_units(*args):
+        if system_mode.get() == "Solar System":
+            apo_label.config(text="Apoapsis [AU]:")
+            peri_label.config(text="Periapsis [AU]:")
+        else:
+            apo_label.config(text="Apoapsis [km]:")
+            peri_label.config(text="Periapsis [km]:")
+
+    system_mode.trace_add("write", update_units)
 
     # -----------------------------
     # UI layout
     # -----------------------------
     CANVAS_SIZE = 500
 
-    frame = tk.Frame(root, width=500, height=500)
+    frame = tk.Frame(root)
     frame.pack()
+
+    mode_frame = tk.Frame(frame)
+    mode_frame.pack(pady=5)
+
+    tk.Label(mode_frame, text="System:").pack(side=tk.LEFT)
+
+    tk.OptionMenu(
+        mode_frame,
+        system_mode,
+        "Solar System",
+        "Earth–Moon System"
+    ).pack(side=tk.LEFT)
 
     input_frame = tk.Frame(frame)
     input_frame.pack(pady=10)
 
-    tk.Label(input_frame, text="Apoapsis [km]:").grid(row=0, column=0, sticky="e")
-    apo_entry = tk.Entry(input_frame, width=15)
-    apo_entry.grid(row=0, column=1, padx=5)
+    peri_label = tk.Label(input_frame)
+    peri_label.grid(row=0, column=0, sticky="e")
 
-    tk.Label(input_frame, text="Periapsis [km]:").grid(row=1, column=0, sticky="e")
     peri_entry = tk.Entry(input_frame, width=15)
-    peri_entry.grid(row=1, column=1, padx=5)
+    peri_entry.grid(row=0, column=1, padx=5)
 
-    draw_button = tk.Button(input_frame, text="Draw Orbit", command=draw_orbit)
-    draw_button.grid(row=0, column=2, rowspan=2, padx=10)
+    apo_label = tk.Label(input_frame)
+    apo_label.grid(row=1, column=0, sticky="e")
 
-    canvas = tk.Canvas(
-        frame,
-        width=CANVAS_SIZE,
-        height=CANVAS_SIZE,
-        bg="black"
-    )
+    apo_entry = tk.Entry(input_frame, width=15)
+    apo_entry.grid(row=1, column=1, padx=5)
+
+    tk.Button(
+        input_frame,
+        text="Draw Orbit",
+        command=draw_orbit
+    ).grid(row=0, column=2, rowspan=2, padx=10)
+
+    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
     canvas.pack(pady=10)
 
     info_label = tk.Label(frame, justify=tk.LEFT)
     info_label.pack(pady=10)
 
+    update_units()
     apo_entry.focus()
-
 
 
 def parallaxe_distance_UI2(root):
