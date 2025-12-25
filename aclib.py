@@ -133,7 +133,8 @@ def compute_orbit_scale(canvas_size, radii, padding=30):
     return (canvas_size / 2 - padding) / max_r
 
 
-def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
+"""
+def draw_kepler_orbit_disabled(canvas, a, e, scale, cx, cy,
                       color="white", width=2, dashed=False):
 
     if a <= 0 or e >= 1:
@@ -153,7 +154,55 @@ def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
         width=width,
         dash=(4, 4) if dashed else None
     )
+"""
 
+
+def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
+                      color="white", width=2):
+    """
+    Draws an elliptical or hyperbolic Kepler orbit.
+    Focus is at the central body (cx, cy).
+    """
+
+    points = []
+
+    # --- Angle range ---
+    if e < 1.0:
+        # Ellipse
+        theta_min = 0.0
+        theta_max = 2 * math.pi
+        steps = 600
+    else:
+        # Hyperbola: limit to real values
+        theta_max = math.acos(-1 / e)
+        theta_min = -theta_max
+        steps = 600
+
+    dtheta = (theta_max - theta_min) / steps
+
+    theta = theta_min
+    for _ in range(steps + 1):
+        denom = 1 + e * math.cos(theta)
+
+        # Skip invalid regions
+        if denom > 0:
+            r = a * (1 - e**2) / denom
+
+            if r > 0:
+                x = cx + r * math.cos(theta) * scale
+                y = cy - r * math.sin(theta) * scale
+                points.extend([x, y])
+
+        theta += dtheta
+
+    if len(points) > 4:
+        canvas.create_line(
+            points,
+            fill=color,
+            width=width,
+            smooth=True,
+            dash=(6, 4) if e > 1 else None
+        )
 
 def draw_reference_orbits(canvas, mode, scale, cx, cy):
     AU = 1.495978707e11
