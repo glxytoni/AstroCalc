@@ -6,6 +6,5 @@ It’s built for speed, simplicity, and practical use — no giant libraries req
 ## ✨ Features
 - Distance calculations (AU, light-years, parsecs)
 - Orbital period / velocity helpers
-- Coordinate conversions (RA/Dec, Alt/Az)
-- Time conversions (Julian date, sidereal time)
+- Orbital Visualisation Tools
 - Small-body / planet data lookups
