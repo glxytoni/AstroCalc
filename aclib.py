@@ -382,8 +382,8 @@ def hohmann_transfer_UI3(root):
     start_alt_entry.focus()
 
 
-
-def orbit_visualizer_UI2(root):
+"""
+def orbit_visualizer_UI1(root):
     # -----------------------------
     # Clear existing UI
     # -----------------------------
@@ -570,6 +570,164 @@ def orbit_visualizer_UI2(root):
 
     update_units()
     apo_entry.focus()
+"""
+
+
+def orbit_visualizer_UI2(root):
+    import math
+    import tkinter as tk
+
+    # ---- Clear UI ----
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+    # ---- Central bodies ----
+    bodies = {
+        "Sun":   (1.32712440018e20, 6.9634e8, "solar"),
+        "Earth": (3.986004418e14,   6.371e6,  "earth_moon"),
+    }
+
+    selected_body = tk.StringVar(value="Earth")
+    input_mode = tk.StringVar(value="Apo/Peri")
+
+    # ---- Main frame ----
+    frame = tk.Frame(root)
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+
+    # ---- Controls ----
+    top = tk.Frame(frame)
+    top.pack(anchor="w")
+
+    tk.Label(top, text="Central body: ").pack(side=tk.LEFT)
+    tk.OptionMenu(top, selected_body, *bodies.keys()).pack(side=tk.LEFT, padx=5)
+
+    tk.Label(top, text="Input mode: ").pack(side=tk.LEFT, padx=(20, 0))
+    tk.OptionMenu(top, input_mode, "Apo/Peri", "Velocity @ Periapsis").pack(side=tk.LEFT)
+
+    # ---- Inputs ----
+    input_frame = tk.Frame(frame)
+    input_frame.pack(anchor="w", pady=10)
+
+    entries = {}
+
+    def make_entry(label):
+        row = tk.Frame(input_frame)
+        row.pack(anchor="w", pady=4)
+        tk.Label(row, text=label, width=28, anchor="w").pack(side=tk.LEFT)
+        e = tk.Entry(row, width=18)
+        e.pack(side=tk.LEFT)
+        return e
+
+    peri_entry = make_entry("Periapsis altitude [km]:")
+    apo_entry  = make_entry("Apoapsis altitude [km]:")
+
+    vel_entry  = make_entry("Velocity at periapsis [km/s]:")
+
+    # ---- Canvas ----
+    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
+    canvas.pack(pady=10)
+
+    result_label = tk.Label(frame, justify=tk.LEFT)
+    result_label.pack(anchor="w")
+
+    # ---- Mode switching ----
+    def update_mode(*args):
+        if input_mode.get() == "Apo/Peri":
+            apo_entry.config(state="normal")
+            vel_entry.config(state="disabled")
+        else:
+            apo_entry.config(state="disabled")
+            vel_entry.config(state="normal")
+
+    input_mode.trace_add("write", update_mode)
+    update_mode()
+
+    # ---- Calculate + draw ----
+    def calculate():
+        try:
+            peri_km = float(peri_entry.get())
+        except ValueError:
+            result_label.config(text="Invalid periapsis input.")
+            return
+
+        body_mu, body_radius, mode = bodies[selected_body.get()]
+
+        r_p = body_radius + peri_km * 1000
+
+        # ---- Determine orbit from mode ----
+        if input_mode.get() == "Apo/Peri":
+            try:
+                apo_km = float(apo_entry.get())
+            except ValueError:
+                result_label.config(text="Invalid apoapsis input.")
+                return
+
+            r_a = body_radius + apo_km * 1000
+
+            a = (r_p + r_a) / 2
+            e = abs(r_a - r_p) / (r_a + r_p)
+
+        else:
+            try:
+                v_p = float(vel_entry.get()) * 1000
+            except ValueError:
+                result_label.config(text="Invalid velocity input.")
+                return
+
+            inv_a = 2 / r_p - v_p**2 / body_mu
+
+            if abs(inv_a) < 1e-12:
+                a = float("inf")
+                e = 1.0
+            else:
+                a = 1 / inv_a
+                e = abs(1 - r_p / a)
+
+        # ---- Drawing ----
+        canvas.delete("all")
+        cx = cy = CANVAS_SIZE / 2
+
+        # Scale from periapsis + reasonable max radius
+        max_r = max(r_p * 2, abs(a) * (1 + e))
+        scale = compute_orbit_scale(CANVAS_SIZE, [max_r])
+
+        body_color = "yellow" if selected_body.get() == "Sun" else "blue"
+
+        draw_central_body(
+            canvas,
+            cx,
+            cy,
+            body_radius,
+            scale,
+            color=body_color
+        )
+
+        draw_reference_orbits(canvas, mode, scale, cx, cy)
+
+        draw_kepler_orbit(
+            canvas,
+            a,
+            e,
+            scale,
+            cx,
+            cy,
+            color="white"
+        )
+
+        orbit_type = (
+            "Elliptic" if e < 1 else
+            "Parabolic" if abs(e - 1) < 1e-3 else
+            "Hyperbolic"
+        )
+
+        result_label.config(text=(
+            f"Orbit type: {orbit_type}\n"
+            f"Semi-major axis: {a/1000:.3f} km\n"
+            f"Eccentricity: {e:.5f}"
+        ))
+
+    tk.Button(frame, text="Draw Orbit", command=calculate).pack(pady=6)
 
 
 def parallaxe_distance_UI2(root):
