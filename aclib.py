@@ -242,7 +242,7 @@ def draw_reference_orbits(canvas, mode, scale, cx, cy):
 
 #====================================================================================
 
-
+#HT_UI3 only has blue for the central body right now 
 def hohmann_transfer_UI3(root):
     import tkinter as tk
     import math
