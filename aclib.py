@@ -571,7 +571,7 @@ def orbit_visualizer_UI1(root):
     update_units()
     apo_entry.focus()
 """
-
+# OV_UI2 breaks if orbit is hyperbolic (numbers are correct the orbit drawing tool doenst work 
 
 def orbit_visualizer_UI2(root):
     import math
