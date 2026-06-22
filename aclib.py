@@ -30,79 +30,77 @@ H01 = 72
 H02 = 67
 
 SOLAR_SYSTEM = {
-"""
-    "constants": {
-        "G":            6.6741e-11,      # gravitational constant (m^3 / kg / s^2)
-        "pi":           3.141592653589793,
-        "AU":           1.495978707e11,  # meter
-        "c":            2.9979e8,        # m/s
-        "ly":           9.461e15,        # meter
-        "parsec":       3.086e16,        # meter
-        "h":            6.626e-34,       # J*s
-        "sigma":        5.6704e-8,       # Stefan-Boltzmann (W/m^2/K^4)
-        "bWien":        2.8978e-3,       # Wien displacement constant (m*K)
 
-        # Hubble parameter examples you had
-        "H01":          72,
-        "H02":          67
-    },
-"""
     "sun": {
-        "radius":       6.69e8,          # meter
-        "mass":         1.988e30,        # kg
-        "gravity":      274,             # m/s^2 at surface
-        "solar_constant": 1367,          # W/m^2 at 1 AU
-        "luminosity":   3.828e26         # W
+        "radius": 6.9634e8,
+        "mass": 1.98847e30,
+        "gravity": 274,
+        "color": "#FFD54A",
+        "type": "star"
     },
 
-    # --- Planets ---
     "mercury": {
-        "radius":       2.4397e6,        # m
-        "mass":         3.3011e23,       # kg
-        "gravity":      3.7              # m/s^2
+        "radius": 2.4397e6,
+        "mass": 3.3011e23,
+        "gravity": 3.7,
+        "color": "#8C8C8C",
+        "type": "planet"
     },
 
     "venus": {
-        "radius":       6.0518e6,        # m
-        "mass":         4.8675e24,       # kg
-        "gravity":      8.87             # m/s^2
+        "radius": 6.0518e6,
+        "mass": 4.8675e24,
+        "gravity": 8.87,
+        "color": "#E6C87A",
+        "type": "planet"
     },
 
     "earth": {
-        "radius":       6.371e6,         # m
-        "mass":         5.9722e24,       # kg
-        "gravity":      9.80665,         # m/s^2
-        "eccentricity": 0.0167           # mean orbital eccentricity (you already had this)
+        "radius": 6.371e6,
+        "mass": 5.9722e24,
+        "gravity": 9.80665,
+        "color": "#2B6FFF",
+        "type": "planet"
     },
 
     "mars": {
-        "radius":       3.3895e6,        # m
-        "mass":         6.4171e23,       # kg
-        "gravity":      3.72076          # m/s^2
+        "radius": 3.3895e6,
+        "mass": 6.4171e23,
+        "gravity": 3.72076,
+        "color": "#C1440E",
+        "type": "planet"
     },
 
     "jupiter": {
-        "radius":       6.9911e7,        # m
-        "mass":         1.8982e27,       # kg
-        "gravity":      24.79            # m/s^2
+        "radius": 6.9911e7,
+        "mass": 1.8982e27,
+        "gravity": 24.79,
+        "color": "#D9B38C",
+        "type": "planet"
     },
 
     "saturn": {
-        "radius":       5.8232e7,        # m
-        "mass":         5.6834e26,       # kg
-        "gravity":      10.44            # m/s^2
+        "radius": 5.8232e7,
+        "mass": 5.6834e26,
+        "gravity": 10.44,
+        "color": "#E8D8A8",
+        "type": "planet"
     },
 
     "uranus": {
-        "radius":       2.5362e7,        # m
-        "mass":         8.6810e25,       # kg
-        "gravity":      8.69             # m/s^2
+        "radius": 2.5362e7,
+        "mass": 8.6810e25,
+        "gravity": 8.69,
+        "color": "#8DE0E8",
+        "type": "planet"
     },
 
     "neptune": {
-        "radius":       2.4622e7,        # m
-        "mass":         1.02413e26,      # kg
-        "gravity":      11.15            # m/s^2
+        "radius": 2.4622e7,
+        "mass": 1.02413e26,
+        "gravity": 11.15,
+        "color": "#4169E1",
+        "type": "planet"
     }
 }
 
@@ -133,28 +131,7 @@ def compute_orbit_scale(canvas_size, radii, padding=30):
     return (canvas_size / 2 - padding) / max_r
 
 
-"""
-def draw_kepler_orbit_disabled(canvas, a, e, scale, cx, cy,
-                      color="white", width=2, dashed=False):
 
-    if a <= 0 or e >= 1:
-        return
-
-    b = a * math.sqrt(1 - e**2)
-    c = a * e
-
-    x0 = cx - (a - c) * scale
-    y0 = cy - b * scale
-    x1 = cx + (a + c) * scale
-    y1 = cy + b * scale
-
-    canvas.create_oval(
-        x0, y0, x1, y1,
-        outline=color,
-        width=width,
-        dash=(4, 4) if dashed else None
-    )
-"""
 
 
 def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
@@ -242,8 +219,7 @@ def draw_reference_orbits(canvas, mode, scale, cx, cy):
 
 #====================================================================================
 
-#HT_UI3 only has blue for the central body right now 
-def hohmann_transfer_UI3(root):
+def hohmann_transfer_UI4(root):
     import tkinter as tk
     import math
 
@@ -251,15 +227,7 @@ def hohmann_transfer_UI3(root):
         if widget.winfo_class() not in ["Menu", "Button"]:
             widget.destroy()
 
-    bodies = {
-        "Earth": (3.986004418e14, 6.371e6),
-        "Moon": (4.9048695e12, 1.7374e6),
-        "Mars": (4.282837e13, 3.3895e6),
-        "Venus": (3.24859e14, 6.0518e6),
-        "Sun": (1.32712440018e20, 6.9634e8),
-    }
-
-    selected_body = tk.StringVar(value="Earth")
+    selected_body = tk.StringVar(value="earth")
 
     frame = tk.Frame(root)
     frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -267,8 +235,17 @@ def hohmann_transfer_UI3(root):
     body_frame = tk.Frame(frame)
     body_frame.pack(anchor="w")
 
-    tk.Label(body_frame, text="Central body: ").pack(side=tk.LEFT)
-    tk.OptionMenu(body_frame, selected_body, *bodies.keys()).pack(side=tk.LEFT)
+    tk.Label(
+        body_frame,
+        text="Central body: "
+    ).pack(side=tk.LEFT)
+
+    tk.OptionMenu(
+        body_frame,
+        selected_body,
+        *[b.title() for b in SOLAR_SYSTEM.keys()]
+    ).pack(side=tk.LEFT)
+
 
     input_frame = tk.Frame(frame)
     input_frame.pack(anchor="w", pady=10)
@@ -279,298 +256,209 @@ def hohmann_transfer_UI3(root):
     ]
 
     entries = []
+
     for text in labels:
         row = tk.Frame(input_frame)
         row.pack(anchor="w", pady=4)
-        tk.Label(row, text=text).pack(side=tk.LEFT)
+
+        tk.Label(
+            row,
+            text=text
+        ).pack(side=tk.LEFT)
+
         e = tk.Entry(row, width=16)
         e.pack(side=tk.LEFT)
+
         entries.append(e)
 
     start_alt_entry, final_alt_entry = entries
 
+
     CANVAS_SIZE = 420
-    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
+
+    canvas = tk.Canvas(
+        frame,
+        width=CANVAS_SIZE,
+        height=CANVAS_SIZE,
+        bg="black"
+    )
     canvas.pack(pady=10)
 
-    result_label = tk.Label(frame, justify=tk.LEFT, anchor="w")
+
+    result_label = tk.Label(
+        frame,
+        justify=tk.LEFT,
+        anchor="w"
+    )
     result_label.pack(fill=tk.X, pady=6)
 
+
     def calculate():
+
         try:
-            h1 = float(start_alt_entry.get()) * 1000  # start altitude [m]
-            h2 = float(final_alt_entry.get()) * 1000  # final altitude [m]
+            h1 = float(start_alt_entry.get()) * 1000
+            h2 = float(final_alt_entry.get()) * 1000
+
         except ValueError:
-            result_label.config(text="Error: Invalid input, please enter numeric altitudes in km.")
+            result_label.config(
+                text="Error: Invalid altitude input."
+            )
             return
+
 
         if h1 < 0 or h2 < 0:
-            result_label.config(text="Error: Altitudes must be >= 0.")
+            result_label.config(
+                text="Error: Altitudes must be >= 0"
+            )
             return
 
-        mu, R = bodies[selected_body.get()]
 
-        # --- Radii from central body ---
+        # -----------------------
+        # BODY LOOKUP
+        # -----------------------
+
+        body_key = selected_body.get().lower()
+
+        body = SOLAR_SYSTEM[body_key]
+
+        R = body["radius"]
+
+        mu = G * body["mass"]
+
+
+        # -----------------------
+        # ORBIT CALCULATIONS
+        # -----------------------
+
         r1 = R + h1
         r2 = R + h2
 
-        # --- Circular velocities ---
+
         v1 = math.sqrt(mu / r1)
         v2 = math.sqrt(mu / r2)
 
-        # --- Transfer orbit ---
-        a_t = (r1 + r2) / 2.0
-        vtp = math.sqrt(mu * (2.0 / r1 - 1.0 / a_t))
-        vta = math.sqrt(mu * (2.0 / r2 - 1.0 / a_t))
 
-        # --- Burns ---
+        a_t = (r1 + r2) / 2
+
+        vtp = math.sqrt(
+            mu * (2/r1 - 1/a_t)
+        )
+
+        vta = math.sqrt(
+            mu * (2/r2 - 1/a_t)
+        )
+
+
         dv1 = abs(vtp - v1)
         dv2 = abs(v2 - vta)
 
-        result_label.config(text=(
-            f"Hohmann Transfer ({selected_body.get()}):\n"
-            f"ΔV₁ = {dv1 / 1000:.6f} km/s\n"
-            f"ΔV₂ = {dv2 / 1000:.6f} km/s\n"
-            f"Total ΔV = {(dv1 + dv2) / 1000:.6f} km/s"
-        ))
 
-        # ---- DRAWING ----
-        canvas.delete("all")
-        cx = cy = CANVAS_SIZE / 2
-
-        # Scale based on *largest orbit actually drawn*
-        scale = compute_orbit_scale(
-            CANVAS_SIZE,
-            [r1, r2, a_t * (1 + abs(r2 - r1) / (r2 + r1))]
+        result_label.config(
+            text=(
+                f"Hohmann Transfer ({body_key.title()}):\n"
+                f"ΔV₁ = {dv1/1000:.6f} km/s\n"
+                f"ΔV₂ = {dv2/1000:.6f} km/s\n"
+                f"Total ΔV = {(dv1+dv2)/1000:.6f} km/s"
+            )
         )
 
-        mode = "solar" if selected_body.get() == "Sun" else "earth_moon"
 
-        # Pick color based on central body
-        body_color = "yellow" if mode == "solar" else "blue"
+        # -----------------------
+        # DRAWING
+        # -----------------------
 
-        # Central body (NEW signature)
+        canvas.delete("all")
+
+        cx = cy = CANVAS_SIZE / 2
+
+
+        scale = compute_orbit_scale(
+            CANVAS_SIZE,
+            [
+                r1,
+                r2,
+                a_t * (1 + abs(r2-r1)/(r2+r1))
+            ]
+        )
+
+
+        # Sun = solar mode
+        # Earth = earth/moon mode
+        if body_key == "earth":
+            mode = "earth_moon"
+        else:
+            mode = "solar"
+
+        body_color = SOLAR_SYSTEM[body_key].get(
+            "color",
+            "#FFFFFF"
+        )
+
+
         draw_central_body(
             canvas,
             cx,
             cy,
-            R,  # physical radius in meters
+            R,
             scale,
-            "blue"
+            body_color
         )
 
-        # Reference orbits
-        draw_reference_orbits(canvas, mode, scale, cx, cy)
+
+        draw_reference_orbits(
+            canvas,
+            mode,
+            scale,
+            cx,
+            cy
+        )
 
 
-        # --- Start orbit (circular) ---
-        a1 = r1  # semi-major axis = radius
-        e1 = 0.0  # circular
-        draw_kepler_orbit(canvas, a1, e1, scale, cx, cy)
+        # starting circular orbit
+        draw_kepler_orbit(
+            canvas,
+            r1,
+            0,
+            scale,
+            cx,
+            cy
+        )
 
-        # --- Transfer orbit (elliptical) ---
-        a_t = (r1 + r2) / 2.0
-        e_t = abs(r2 - r1) / (r2 + r1)
-        draw_kepler_orbit(canvas, a_t, e_t, scale, cx, cy)
 
-        # --- Final orbit (circular) ---
-        a2 = r2
-        e2 = 0.0
-        draw_kepler_orbit(canvas, a2, e2, scale, cx, cy)
+        # transfer ellipse
+        e_t = abs(r2-r1)/(r2+r1)
 
-    tk.Button(frame, text="Calculate ΔV", command=calculate).pack(pady=8)
+        draw_kepler_orbit(
+            canvas,
+            a_t,
+            e_t,
+            scale,
+            cx,
+            cy
+        )
+
+
+        # final circular orbit
+        draw_kepler_orbit(
+            canvas,
+            r2,
+            0,
+            scale,
+            cx,
+            cy
+        )
+
+
+    tk.Button(
+        frame,
+        text="Calculate ΔV",
+        command=calculate
+    ).pack(pady=8)
+
+
     start_alt_entry.focus()
 
 
-"""
-def orbit_visualizer_UI1(root):
-    # -----------------------------
-    # Clear existing UI
-    # -----------------------------
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
-
-    AU_KM = 149_597_870
-
-    # -----------------------------
-    # State
-    # -----------------------------
-    system_mode = tk.StringVar(value="Solar System")
-
-    # -----------------------------
-    # Inner draw function
-    # -----------------------------
-    def draw_orbit():
-        try:
-            ra_input = float(apo_entry.get())
-            rp_input = float(peri_entry.get())
-        except ValueError:
-            info_label.config(text="Error: Invalid input.")
-            return
-
-        # Convert units to km
-        if system_mode.get() == "Solar System":
-            ra = ra_input * AU_KM
-            rp = rp_input * AU_KM
-        else:
-            ra = ra_input
-            rp = rp_input
-
-        if rp <= 0 or ra <= 0 or ra < rp:
-            info_label.config(text="Error: Require ra ≥ rp > 0")
-            return
-
-        canvas.delete("all")
-
-        # --- Orbital geometry ---
-        a = (ra + rp) / 2
-        e = (ra - rp) / (ra + rp)
-        b = a * math.sqrt(1 - e**2)
-        c = a * e
-
-        # --- Scaling (always scale to analyzed orbit) ---
-        padding = 40
-        scale = (CANVAS_SIZE / 2 - padding) / ra
-
-        cx = CANVAS_SIZE / 2
-        cy = CANVAS_SIZE / 2
-
-        # -----------------------------
-        # System definitions
-        # -----------------------------
-        if system_mode.get() == "Solar System":
-            central_color = "yellow"
-            reference_orbits = [
-                ("Mercury",  57_909_227,  "#808080"),
-                ("Venus",   108_209_475,  "#FFFFF0"),
-                ("Earth",   149_597_870,  "#3399ff"),
-                ("Mars",    227_943_824,  "#ff3333"),
-                ("Jupiter", 778_340_821,  "#ff8c00"),
-                ("Saturn", 1_426_666_422, "#ffa500"),
-                ("Uranus", 2_870_658_186, "#66ccff"),
-                ("Neptune",4_498_396_441, "#00008b"),
-            ]
-        else:
-            central_color = "#3399ff"  # Earth
-            reference_orbits = [
-                ("Moon", 384_400, "#cccccc")
-            ]
-
-        # -----------------------------
-        # Central body
-        # -----------------------------
-        focus_x = cx - c * scale
-        focus_y = cy
-
-        canvas.create_oval(
-            focus_x - 5, focus_y - 5,
-            focus_x + 5, focus_y + 5,
-            fill=central_color,
-            outline=""
-        )
-
-        # -----------------------------
-        # Reference orbits
-        # -----------------------------
-        for _, orbit_km, color in reference_orbits:
-            r = orbit_km * scale
-            canvas.create_oval(
-                focus_x - r, focus_y - r,
-                focus_x + r, focus_y + r,
-                outline=color,
-                dash=(4, 4)
-            )
-
-        # -----------------------------
-        # Actual orbit
-        # -----------------------------
-        rx = a * scale
-        ry = b * scale
-        canvas.create_oval(
-            cx - rx, cy - ry,
-            cx + rx, cy + ry,
-            outline="white",
-            width=2
-        )
-
-        # -----------------------------
-        # Output text
-        # -----------------------------
-        if system_mode.get() == "Solar System":
-            a_str = f"{a / AU_KM:.3f} AU"
-        else:
-            a_str = f"{a:,.0f} km"
-
-        info_label.config(
-            text=f"System: {system_mode.get()}\n"
-                 f"Eccentricity: {e:.4f}\n"
-                 f"Semi-major axis: {a_str}"
-        )
-
-    # -----------------------------
-    # Update input units on mode change
-    # -----------------------------
-    def update_units(*args):
-        if system_mode.get() == "Solar System":
-            apo_label.config(text="Apoapsis [AU]:")
-            peri_label.config(text="Periapsis [AU]:")
-        else:
-            apo_label.config(text="Apoapsis [km]:")
-            peri_label.config(text="Periapsis [km]:")
-
-    system_mode.trace_add("write", update_units)
-
-    # -----------------------------
-    # UI layout
-    # -----------------------------
-    CANVAS_SIZE = 500
-
-    frame = tk.Frame(root)
-    frame.pack()
-
-    mode_frame = tk.Frame(frame)
-    mode_frame.pack(pady=5)
-
-    tk.Label(mode_frame, text="System:").pack(side=tk.LEFT)
-
-    tk.OptionMenu(
-        mode_frame,
-        system_mode,
-        "Solar System",
-        "Earth–Moon System"
-    ).pack(side=tk.LEFT)
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=10)
-
-    peri_label = tk.Label(input_frame)
-    peri_label.grid(row=0, column=0, sticky="e")
-
-    peri_entry = tk.Entry(input_frame, width=15)
-    peri_entry.grid(row=0, column=1, padx=5)
-
-    apo_label = tk.Label(input_frame)
-    apo_label.grid(row=1, column=0, sticky="e")
-
-    apo_entry = tk.Entry(input_frame, width=15)
-    apo_entry.grid(row=1, column=1, padx=5)
-
-    tk.Button(
-        input_frame,
-        text="Draw Orbit",
-        command=draw_orbit
-    ).grid(row=0, column=2, rowspan=2, padx=10)
-
-    canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg="black")
-    canvas.pack(pady=10)
-
-    info_label = tk.Label(frame, justify=tk.LEFT)
-    info_label.pack(pady=10)
-
-    update_units()
-    apo_entry.focus()
-"""
 # OV_UI2 breaks if orbit is hyperbolic (numbers are correct the orbit drawing tool doenst work 
 
 def orbit_visualizer_UI2(root):
