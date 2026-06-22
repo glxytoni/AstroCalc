@@ -23,7 +23,7 @@ def open_spectral_class():
 
 def open_hohmann_transfer():
     hohman_transfer_window = tk.Toplevel(root)
-    mfc.hohmann_transfer_UI3(hohman_transfer_window)
+    mfc.hohmann_transfer_UI4(hohman_transfer_window)
 
 def open_rocket_dV():
     rocket_dV_window = tk.Toplevel(root)
