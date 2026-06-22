@@ -23,7 +23,7 @@ def open_spectral_class():
 
 def open_hohmann_transfer():
     hohman_transfer_window = tk.Toplevel(root)
-    mfc.hohmann_transfer_UI2(hohman_transfer_window)
+    mfc.hohmann_transfer_UI4(hohman_transfer_window)
 
 def open_rocket_dV():
     rocket_dV_window = tk.Toplevel(root)
@@ -70,6 +70,7 @@ tools_menu.add_command(label="- Stellar Spectrum", command=open_spectral_class)
 tools_menu.add_command(label="- Roche Limit", command=open_roche_limit)
 tools_menu.add_command(label="- Orbit Visualizer", command=open_orbit_visualizer)
 
+tools_menu.add_command(label="Patched-Conics Gravity Assist Visualizer[WIP]")
 tools_menu.add_command(label="Orbit Analysis [WIP]")
 tools_menu.add_command(label="Relativistic Speed Kinetic Energy [WIP]")
 tools_menu.add_command(label="Hubble Expansion via Redshift [WIP]")
