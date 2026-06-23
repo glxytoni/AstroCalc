@@ -49,7 +49,7 @@ def open_orbit_visualizer():
 
 
 root = tk.Tk()
-root.title("Astrocalc0.3.2")
+root.title("Astrocalc0.3.3")
 root.option_add("*Font", "TkDefaultFont 20")  # Set default font for all widgets
 root.option_add("*Label.Font", "TkDefaultFont 20")  # Set font for all labels
 root.option_add("*MenuButton.Font", "TkDefaultFont 20")  # Set font for all menu buttons
