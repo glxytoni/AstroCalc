@@ -5,6 +5,10 @@ from tkinter import ttk
 
 # (Your constants and other code remain unchanged)
 
+def open_rel_kin_energy():
+    rel_kin_energy_window = tk.Toplevel(root)
+    mfc.relativistic_kinetic_energy_UI(rel_kin_energy_window)
+
 def open_photon_energy_spectrum():
     photon_energy_spectrum_window = tk.Toplevel(root)
     mfc.photon_energy_spectrum_UI(photon_energy_spectrum_window)
@@ -60,6 +64,7 @@ tools_menu = tk.Menu(menu)
 menu.add_cascade(label="Tools", menu=tools_menu)
 
 # add the available tools as menu options
+tools_menu.add_command(label="- Relativistic Kinetic Energy", command=open_rel_kin_energy)
 tools_menu.add_command(label="- Photon Energy/Spectrum", command=open_photon_energy_spectrum)
 tools_menu.add_command(label="- Parallaxe Distance", command=open_parallaxe_distance)
 tools_menu.add_command(label="- Hohmann Transfer", command=open_hohmann_transfer)
@@ -69,7 +74,7 @@ tools_menu.add_command(label="- Stellar Magnitude", command=open_stellar_mag)
 tools_menu.add_command(label="- Stellar Spectrum", command=open_spectral_class)
 tools_menu.add_command(label="- Roche Limit", command=open_roche_limit)
 
-tools_menu.add_command(label="- Orbit Visualizer[WIP]")
+tools_menu.add_command(label="Orbit Visualizer [WIP]")
 tools_menu.add_command(label="Patched-Conics Gravity Assist Visualizer[WIP]")
 tools_menu.add_command(label="Orbit Analysis [WIP]")
 tools_menu.add_command(label="Relativistic Speed Kinetic Energy [WIP]")
@@ -80,4 +85,4 @@ tools_menu.add_command(label="Stellar Constant [WIP]")
 
 root.mainloop()
 
-
+relativistic_kinetic_energy_UI
