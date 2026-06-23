@@ -219,6 +219,252 @@ def draw_reference_orbits(canvas, mode, scale, cx, cy):
 
 #====================================================================================
 
+
+def relativistic_kinetic_energy_UI(root):
+
+    import tkinter as tk
+    import math
+
+    c = 299792458
+
+    frame = tk.Frame(root)
+    frame.pack(padx=10, pady=10)
+
+    tk.Label(frame,text="Mass [kg]").grid(row=0,column=0)
+    mass_entry = tk.Entry(frame)
+    mass_entry.grid(row=0,column=1)
+
+    tk.Label(frame,text="Velocity [m/s]").grid(row=1,column=0)
+    vel_entry = tk.Entry(frame)
+    vel_entry.grid(row=1,column=1)
+
+    result = tk.Label(frame,justify=tk.LEFT)
+    result.grid(row=3,column=0,columnspan=2)
+
+
+    def calculate():
+
+        try:
+            m = float(mass_entry.get())
+            v = float(vel_entry.get())
+
+            if v >= c:
+                result.config(text="Velocity must be below c")
+                return
+
+            gamma = 1 / math.sqrt(1-(v*v)/(c*c))
+
+            KE = (gamma-1)*m*c*c
+
+
+            result.config(
+                text=
+                f"Lorentz factor γ = {gamma:.6g}\n"
+                f"Kinetic Energy = {KE:.6e} J\n"
+                f"Kg of TNT      = {KE/4.2e6:.3f} Kg\n"
+                f"t of TNT      = {KE/4.184e9:.3f} t\n"
+                f"Kt of TNT      = {KE/4.184e12:.3f} kt\n"
+                f"Mt of TNT      = {KE/4.184e15:.3f} Mt"
+
+            )
+
+        except:
+            result.config(text="Invalid input")
+
+
+    tk.Button(
+        frame,
+        text="Calculate",
+        command=calculate
+    ).grid(row=2,column=0,columnspan=2)
+
+
+def relativistic_kinetic_energy_UI2(root):
+    import tkinter as tk
+    import math
+
+    # clear screen except menu/buttons
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+
+    c = 299_792_458  # m/s
+
+
+    # -------------------------
+    # UNIT FORMATTERS
+    # -------------------------
+
+    def format_energy(joules):
+
+        ev = joules / 1.602176634e-19
+
+        units = [
+            ("eV", 1),
+            ("keV", 1e3),
+            ("MeV", 1e6),
+            ("GeV", 1e9),
+            ("TeV", 1e12),
+            ("PeV", 1e15),
+            ("EeV", 1e18),
+        ]
+
+        if ev == 0:
+            return "0 eV"
+
+        for name, factor in reversed(units):
+            if abs(ev) >= factor:
+                return f"{ev/factor:.4g} {name}"
+
+        return f"{ev:.4g} eV"
+
+
+    def format_mass(kg):
+
+        units = [
+            ("kg", 1),
+            ("t", 1e3),
+            ("kt", 1e6),
+            ("Mt", 1e9),
+            ("Gt", 1e12),
+        ]
+
+        if kg == 0:
+            return "0 kg"
+
+        for name, factor in reversed(units):
+            if abs(kg) >= factor:
+                return f"{kg/factor:.4g} {name}"
+
+        return f"{kg:.4g} kg"
+
+
+
+    # -------------------------
+    # CALCULATE
+    # -------------------------
+
+    def calculate(*args):
+
+        try:
+            mass = float(mass_entry.get())
+            velocity = float(velocity_entry.get())
+
+        except ValueError:
+            result_label.config(
+                text="Error: Invalid input"
+            )
+            return
+
+
+        if mass <= 0:
+            result_label.config(
+                text="Mass must be positive"
+            )
+            return
+
+
+        if velocity >= c:
+            result_label.config(
+                text="Velocity must be below c"
+            )
+            return
+
+
+        if velocity < 0:
+            result_label.config(
+                text="Velocity cannot be negative"
+            )
+            return
+
+
+        gamma = 1 / math.sqrt(
+            1 - (velocity**2 / c**2)
+        )
+
+
+        rest_energy = mass * c**2
+
+        total_energy = gamma * rest_energy
+
+        kinetic_energy = total_energy - rest_energy
+
+
+        result_label.config(
+            text=(
+                f"Lorentz factor γ:\n"
+                f"{gamma:.8g}\n"
+                f"------------------------\n"
+                f"Rest Energy:\n"
+                f"{format_energy(rest_energy)}\n"
+                f"------------------------\n"
+                f"Kinetic Energy:\n"
+                f"{format_energy(kinetic_energy)}\n"
+                f"------------------------\n"
+                f"Total Relativistic Energy:\n"
+                f"{format_energy(total_energy)}\n"
+                f"------------------------\n"
+                f"Equivalent kinetic mass:\n"
+                f"{format_mass(kinetic_energy/c**2)}"
+            )
+        )
+
+
+    # -------------------------
+    # UI
+    # -------------------------
+
+    frame = tk.Frame(root)
+    frame.pack(padx=10, pady=10)
+
+
+    input_frame = tk.Frame(frame)
+    input_frame.pack(pady=10)
+
+
+    tk.Label(
+        input_frame,
+        text="Mass [kg]: "
+    ).grid(row=0, column=0, sticky="w")
+
+
+    mass_entry = tk.Entry(input_frame)
+    mass_entry.grid(row=0, column=1)
+
+
+    tk.Label(
+        input_frame,
+        text="Velocity [m/s]: "
+    ).grid(row=1, column=0, sticky="w")
+
+
+    velocity_entry = tk.Entry(input_frame)
+    velocity_entry.grid(row=1, column=1)
+
+
+    mass_entry.bind("<Return>", calculate)
+    velocity_entry.bind("<Return>", calculate)
+
+
+    tk.Button(
+        frame,
+        text="Calculate",
+        command=calculate
+    ).pack(pady=10)
+
+
+    result_label = tk.Label(
+        frame,
+        justify=tk.LEFT,
+        anchor="w"
+    )
+    result_label.pack(pady=10)
+
+
+    mass_entry.focus()
+
+#====================================================================================
 def hohmann_transfer_UI4(root):
     import tkinter as tk
     import math
@@ -227,7 +473,7 @@ def hohmann_transfer_UI4(root):
         if widget.winfo_class() not in ["Menu", "Button"]:
             widget.destroy()
 
-    selected_body = tk.StringVar(value="earth")
+    selected_body = tk.StringVar(value="Earth")
 
     frame = tk.Frame(root)
     frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -459,7 +705,7 @@ def hohmann_transfer_UI4(root):
     start_alt_entry.focus()
 
 
-# OV_UI2 breaks if orbit is hyperbolic (numbers are correct the orbit drawing tool doenst work 
+# OV_UI2 breaks if orbit is hyperbolic (numbers are correct the orbit drawing tool doenst work
 
 def orbit_visualizer_UI2(root):
     import math
