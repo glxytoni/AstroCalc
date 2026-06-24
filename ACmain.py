@@ -7,7 +7,11 @@ from tkinter import ttk
 
 def open_rel_kin_energy():
     rel_kin_energy_window = tk.Toplevel(root)
-    mfc.relativistic_kinetic_energy_UI(rel_kin_energy_window)
+    mfc.relativistic_kinetic_energy_UI2(rel_kin_energy_window)
+
+def open_mass_energy():
+    mass_energy_window = tk.Toplevel(root)
+    mfc.relativistic_kinetic_energy_UI3(mass_energy_window)
 
 def open_photon_energy_spectrum():
     photon_energy_spectrum_window = tk.Toplevel(root)
@@ -65,6 +69,7 @@ menu.add_cascade(label="Tools", menu=tools_menu)
 
 # add the available tools as menu options
 tools_menu.add_command(label="- Relativistic Kinetic Energy", command=open_rel_kin_energy)
+tools_menu.add_command(label="- Mass-Energy calculator", command=open_mass_energy)
 tools_menu.add_command(label="- Photon Energy/Spectrum", command=open_photon_energy_spectrum)
 tools_menu.add_command(label="- Parallaxe Distance", command=open_parallaxe_distance)
 tools_menu.add_command(label="- Hohmann Transfer", command=open_hohmann_transfer)

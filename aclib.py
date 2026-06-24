@@ -261,10 +261,10 @@ def relativistic_kinetic_energy_UI(root):
                 text=
                 f"Lorentz factor γ = {gamma:.6g}\n"
                 f"Kinetic Energy = {KE:.6e} J\n"
-                f"Kg of TNT      = {KE/4.2e6:.3f} Kg\n"
+                f"Kg of TNT      = {KE/4.2e6:.2f} Kg\n"
                 f"t of TNT      = {KE/4.184e9:.3f} t\n"
-                f"Kt of TNT      = {KE/4.184e12:.3f} kt\n"
-                f"Mt of TNT      = {KE/4.184e15:.3f} Mt"
+                f"Kt of TNT      = {KE/4.184e12:.2f} kt\n"
+                f"Mt of TNT      = {KE/4.184e15:.2} Mt"
 
             )
 
@@ -280,6 +280,137 @@ def relativistic_kinetic_energy_UI(root):
 
 
 def relativistic_kinetic_energy_UI2(root):
+
+    import tkinter as tk
+    import math
+
+    c = 299792458
+
+    frame = tk.Frame(root)
+    frame.pack(padx=10, pady=10)
+
+    # False = m/s
+    # True = fraction of c
+    velocity_mode = tk.BooleanVar(value=False)
+
+    tk.Label(frame, text="Mass [kg]").grid(row=0, column=0)
+
+    mass_entry = tk.Entry(frame)
+    mass_entry.grid(row=0, column=1)
+
+    velocity_label = tk.Label(frame, text="Velocity [m/s]")
+    velocity_label.grid(row=1, column=0)
+
+    vel_entry = tk.Entry(frame)
+    vel_entry.grid(row=1, column=1)
+
+    result = tk.Label(frame, justify=tk.LEFT)
+    result.grid(row=4, column=0, columnspan=2, pady=10)
+
+    def toggle_velocity_mode():
+
+        velocity_mode.set(not velocity_mode.get())
+
+        if velocity_mode.get():
+            velocity_label.config(
+                text="Velocity [fraction of c]"
+            )
+            mode_button.config(
+                text="Input Mode: Fraction of c"
+            )
+        else:
+            velocity_label.config(
+                text="Velocity [m/s]"
+            )
+            mode_button.config(
+                text="Input Mode: m/s"
+            )
+
+    def calculate(*args):
+
+        try:
+            m = float(mass_entry.get())
+            v_input = float(vel_entry.get())
+
+            if velocity_mode.get():
+                v = v_input * c
+            else:
+                v = v_input
+
+            if v >= c:
+                result.config(
+                    text="Velocity must be below c"
+                )
+                return
+
+            if v < 0:
+                result.config(
+                    text="Velocity cannot be negative"
+                )
+                return
+
+            if m <= 0:
+                result.config(
+                    text="Mass must be positive"
+                )
+                return
+
+            gamma = 1 / math.sqrt(
+                1 - (v * v) / (c * c)
+            )
+
+            KE = (gamma - 1) * m * c * c
+
+            result.config(
+                text=
+                f"Lorentz factor γ = {gamma:.8g}\n"
+                f"--------------------------------\n"
+                f"Kinetic Energy = {KE:.6e} J\n"
+                f"--------------------------------\n"
+                f"Kg TNT = {KE/4.184e6:.3f} kg\n"
+                f"t TNT  = {KE/4.184e9:.3f} t\n"
+                f"kt TNT = {KE/4.184e12:.3f} kt\n"
+                f"Mt TNT = {KE/4.184e15:.3f} Mt\n"
+                f"dino killers = {KE/10e25:.3f}  Meteors"
+            )
+
+        except ValueError:
+            result.config(
+                text="Invalid input"
+            )
+
+    mode_button = tk.Button(
+        frame,
+        text="Input Mode: m/s",
+        command=toggle_velocity_mode
+    )
+    mode_button.grid(
+        row=2,
+        column=0,
+        columnspan=2,
+        pady=5
+    )
+
+    calculate_button = tk.Button(
+        frame,
+        text="Calculate",
+        command=calculate
+    )
+    calculate_button.grid(
+        row=3,
+        column=0,
+        columnspan=2
+    )
+
+    mass_entry.bind("<Return>", calculate)
+    vel_entry.bind("<Return>", calculate)
+
+    mass_entry.focus()
+
+
+
+
+def relativistic_kinetic_energy_UI3(root):
     import tkinter as tk
     import math
 
@@ -328,6 +459,7 @@ def relativistic_kinetic_energy_UI2(root):
             ("kt", 1e6),
             ("Mt", 1e9),
             ("Gt", 1e12),
+
         ]
 
         if kg == 0:
@@ -393,6 +525,9 @@ def relativistic_kinetic_energy_UI2(root):
 
         result_label.config(
             text=(
+                f"Fraction of c:\n"
+                f"{velocity/c:.8f}\n"
+                f"------------------------\n"
                 f"Lorentz factor γ:\n"
                 f"{gamma:.8g}\n"
                 f"------------------------\n"
