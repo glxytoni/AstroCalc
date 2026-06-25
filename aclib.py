@@ -326,6 +326,17 @@ def relativistic_kinetic_energy_UI2(root):
                 text="Input Mode: m/s"
             )
 
+    def smart_format(value):
+
+        if value == 0:
+            return "0"
+
+        if 0.001 <= abs(value) < 100000:
+            return f"{value:.3f}"
+
+        return f"{value:.3e}"
+
+
     def calculate(*args):
 
         try:
@@ -362,16 +373,18 @@ def relativistic_kinetic_energy_UI2(root):
             KE = (gamma - 1) * m * c * c
 
             result.config(
+
                 text=
                 f"Lorentz factor γ = {gamma:.8g}\n"
                 f"--------------------------------\n"
-                f"Kinetic Energy = {KE:.6e} J\n"
+                f"Kinetic Energy = {smart_format(KE)} J\n"
                 f"--------------------------------\n"
-                f"Kg TNT = {KE/4.184e6:.3f} kg\n"
-                f"t TNT  = {KE/4.184e9:.3f} t\n"
-                f"kt TNT = {KE/4.184e12:.3f} kt\n"
-                f"Mt TNT = {KE/4.184e15:.3f} Mt\n"
-                f"dino killers = {KE/10e25:.3f}  Meteors"
+                f"Kg TNT = {smart_format(KE / 4.184e6)} kg\n"
+                f"t  TNT = {smart_format(KE / 4.184e9)} t\n"
+                f"Kt TNT = {smart_format(KE / 4.184e12)} kt\n"
+                f"Mt TNT = {smart_format(KE / 4.184e15)} Mt\n"
+                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt\n"
+                f"dino killers = {smart_format(KE / 1e26)} Meteors"
             )
 
         except ValueError:
@@ -598,6 +611,166 @@ def relativistic_kinetic_energy_UI3(root):
 
 
     mass_entry.focus()
+
+
+
+def relativistic_kinetic_energy_UI4(root):
+    import tkinter as tk
+    import math
+
+    for widget in root.winfo_children():
+        if widget.winfo_class() not in ["Menu", "Button"]:
+            widget.destroy()
+
+    c = 299_792_458
+    e_charge = 1.602176634e-19  # J per eV
+
+    # -------------------------
+    # PARTICLE MASS DATABASE (kg)
+    # -------------------------
+    particles = {
+        "Electron": 9.1093837015e-31,
+        "Muon": 1.883531627e-28,
+        "Tau": 3.16754e-27,
+        "Up quark (~constituent)": 3.0e-30,
+        "Down quark (~constituent)": 5.0e-30,
+        "Proton": 1.67262192369e-27,
+        "Neutron": 1.67492749804e-27,
+        "Higgs boson": 2.24e-25,
+    }
+
+    # -------------------------
+    # FORMATTERS
+    # -------------------------
+    def format_energy(joules):
+        ev = joules / e_charge
+        units = [("eV", 1), ("keV", 1e3), ("MeV", 1e6), ("GeV", 1e9),
+                  ("TeV", 1e12), ("PeV", 1e15), ("EeV", 1e18)]
+
+        if ev == 0:
+            return "0 eV"
+
+        for name, factor in reversed(units):
+            if abs(ev) >= factor:
+                return f"{ev/factor:.4g} {name}"
+
+        return f"{ev:.4g} eV"
+
+    def format_mass(kg):
+        units = [("kg", 1), ("t", 1e3), ("kt", 1e6), ("Mt", 1e9)]
+        if kg == 0:
+            return "0 kg"
+
+        for name, factor in reversed(units):
+            if abs(kg) >= factor:
+                return f"{kg/factor:.4g} {name}"
+
+        return f"{kg:.4g} kg"
+
+    # -------------------------
+    # CALCULATION
+    # -------------------------
+    def calculate(*args):
+        try:
+            mass = particles[particle_var.get()]
+        except KeyError:
+            result_label.config(text="Invalid particle selection")
+            return
+
+        mode = mode_var.get()
+
+        try:
+            if mode == "Velocity → Energy":
+                velocity = float(entry1.get())
+
+                if velocity < 0 or velocity >= c:
+                    result_label.config(text="Velocity must be 0 ≤ v < c")
+                    return
+
+                beta = velocity / c
+                gamma = 1 / math.sqrt(1 - beta**2)
+
+            else:  # Energy → Velocity
+                energy_ev = float(entry1.get())
+                energy = energy_ev * e_charge
+
+                rest_energy = mass * c**2
+                gamma = energy / rest_energy
+
+                if gamma < 1:
+                    result_label.config(text="Energy must be ≥ rest energy")
+                    return
+
+                beta = math.sqrt(1 - 1 / gamma**2)
+                velocity = beta * c
+
+        except ValueError:
+            result_label.config(text="Invalid numeric input")
+            return
+
+        rest_energy = mass * c**2
+        total_energy = gamma * rest_energy
+        kinetic_energy = total_energy - rest_energy
+
+        result_label.config(text=
+            f"Particle mass:\n{format_mass(mass)}\n"
+            f"------------------------\n"
+            f"β = v/c:\n{beta:.10f}\n"
+            f"Velocity:\n{velocity:.6e} m/s\n"
+            f"------------------------\n"
+            f"Lorentz factor γ:\n{gamma:.8g}\n"
+            f"------------------------\n"
+            f"Rest Energy:\n{format_energy(rest_energy)}\n"
+            f"Kinetic Energy:\n{format_energy(kinetic_energy)}\n"
+            f"Total Energy:\n{format_energy(total_energy)}"
+        )
+
+    # -------------------------
+    # UI
+    # -------------------------
+    frame = tk.Frame(root)
+    frame.pack(padx=10, pady=10)
+
+    input_frame = tk.Frame(frame)
+    input_frame.pack(pady=10)
+
+    # particle dropdown
+    tk.Label(input_frame, text="Particle:").grid(row=0, column=0, sticky="w")
+
+    particle_var = tk.StringVar(value="Electron")
+    tk.OptionMenu(input_frame, particle_var, *particles.keys()).grid(row=0, column=1)
+
+    # mode selector
+    mode_var = tk.StringVar(value="Velocity → Energy")
+
+    tk.Label(input_frame, text="Mode:").grid(row=1, column=0, sticky="w")
+    tk.OptionMenu(input_frame, mode_var,
+                  "Velocity → Energy",
+                  "Energy → Velocity").grid(row=1, column=1)
+
+    # input field
+    tk.Label(input_frame, text="Input:").grid(row=2, column=0, sticky="w")
+    entry1 = tk.Entry(input_frame)
+    entry1.grid(row=2, column=1)
+
+    def update_label(*args):
+        if mode_var.get() == "Velocity → Energy":
+            entry1_label.config(text="Velocity [m/s]")
+        else:
+            entry1_label.config(text="Energy [eV]")
+
+    entry1_label = tk.Label(input_frame, text="Velocity [m/s]")
+    entry1_label.grid(row=2, column=2, padx=10)
+
+    mode_var.trace_add("write", update_label)
+
+    # buttons
+    tk.Button(frame, text="Calculate", command=calculate).pack(pady=10)
+
+    result_label = tk.Label(frame, justify=tk.LEFT, anchor="w")
+    result_label.pack(pady=10)
+
+    entry1.bind("<Return>", calculate)
 
 #====================================================================================
 def hohmann_transfer_UI4(root):

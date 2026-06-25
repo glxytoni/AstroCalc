@@ -11,7 +11,7 @@ def open_rel_kin_energy():
 
 def open_mass_energy():
     mass_energy_window = tk.Toplevel(root)
-    mfc.relativistic_kinetic_energy_UI3(mass_energy_window)
+    mfc.relativistic_kinetic_energy_UI4(mass_energy_window)
 
 def open_photon_energy_spectrum():
     photon_energy_spectrum_window = tk.Toplevel(root)
