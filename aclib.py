@@ -372,7 +372,8 @@ def relativistic_kinetic_energy_UI2(root):
 
             KE = (gamma - 1) * m * c * c
 
-            result.config(
+            if KE < 4.184e18:
+                result.config(
 
                 text=
                 f"Lorentz factor γ = {gamma:.8g}\n"
@@ -383,9 +384,29 @@ def relativistic_kinetic_energy_UI2(root):
                 f"t  TNT = {smart_format(KE / 4.184e9)} t\n"
                 f"Kt TNT = {smart_format(KE / 4.184e12)} kt\n"
                 f"Mt TNT = {smart_format(KE / 4.184e15)} Mt\n"
-                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt\n"
+                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt"
+
+
+                )
+                return
+
+            if KE < 4.184e18:
+                result.config(
+
+                text=
+                f"Lorentz factor γ = {gamma:.8g}\n"
+                f"--------------------------------\n"
+                f"Kinetic Energy = {smart_format(KE)} J\n"
+                f"--------------------------------\n"
+                f"Mt TNT = {smart_format(KE / 4.184e15)} Mt\n"
+                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt\n"       
+                f"Hiroshimas = {smart_format(KE / (4.184e12 * 15))} Little Boys\n"
+                f"Tsar Bombs = {smart_format(KE / (4.184e18 * 50))} Tsars\n"
                 f"dino killers = {smart_format(KE / 1e26)} Meteors"
-            )
+                )
+                return
+
+
 
         except ValueError:
             result.config(
