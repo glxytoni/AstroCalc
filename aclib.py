@@ -390,7 +390,7 @@ def relativistic_kinetic_energy_UI2(root):
                 )
                 return
 
-            if KE < 4.184e18:
+            if KE > 4.184e18:
                 result.config(
 
                 text=
@@ -402,7 +402,8 @@ def relativistic_kinetic_energy_UI2(root):
                 f"Gt TNT = {smart_format(KE / 4.184e18)} Gt\n"       
                 f"Hiroshimas = {smart_format(KE / (4.184e12 * 15))} Little Boys\n"
                 f"Tsar Bombs = {smart_format(KE / (4.184e18 * 50))} Tsars\n"
-                f"dino killers = {smart_format(KE / 1e26)} Meteors"
+                f"dino killers = {smart_format(KE / 1e26)} Meteors\n"
+                f"Type 1a = {smart_format(KE / 1.5e44)} Supernovae"
                 )
                 return
 
