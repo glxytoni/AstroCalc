@@ -1,6 +1,8 @@
 import math
 import ast
 import tkinter as tk
+from scipy.integrate import quad
+from astropy.cosmology import Planck15
 from tkinter import ttk
 from tkinter import font
 
@@ -105,6 +107,122 @@ SOLAR_SYSTEM = {
 }
 
 #=====  Backend shi ===========================================
+
+def redshift_to_proper_distance(z):
+    """
+    Calculate the present-day proper (comoving) distance
+    from cosmological redshift using Planck15 cosmology.
+
+    Returns distance in meters.
+    """
+
+    if z < 0:
+        raise ValueError("Redshift cannot be negative.")
+
+    c = 299792458.0  # m/s
+
+    H0 = Planck15.H0.to_value("1/s")
+    omega_m = Planck15.Om0
+    omega_lambda = Planck15.Ode0
+    omega_r = Planck15.Ogamma0 + Planck15.Onu0
+
+    def integrand(z_prime):
+        E = (
+            omega_m * (1.0 + z_prime) ** 3
+            + omega_r * (1.0 + z_prime) ** 4
+            + omega_lambda
+        ) ** 0.5
+
+        return 1.0 / E
+
+    integral, _ = quad(
+        integrand,
+        0.0,
+        z,
+        epsabs=1e-10,
+        epsrel=1e-10
+    )
+
+    distance_m = (c / H0) * integral
+
+    return distance_m
+
+
+def redshift_distance_UI(root):
+
+    window = tk.Toplevel(root)
+    window.title("Redshift Distance")
+    window.geometry("600x500")
+
+    input_frame = tk.Frame(window)
+    input_frame.pack(pady=20)
+
+    tk.Label(
+        input_frame,
+        text="Redshift (z):",
+        font=("Arial", 16)
+    ).grid(row=0, column=0, padx=10, pady=10)
+
+    z_entry = tk.Entry(
+        input_frame,
+        font=("Arial", 16),
+        width=15
+    )
+    z_entry.grid(row=0, column=1, padx=10, pady=10)
+
+    result_label = tk.Label(
+        window,
+        text="",
+        font=("Arial", 15),
+        justify="left"
+    )
+    result_label.pack(pady=20)
+
+    def calculate(*args):
+
+        try:
+            z = float(z_entry.get())
+
+            if z < 0:
+                raise ValueError
+
+            distance_m = redshift_to_proper_distance(z)
+
+            distance_pc = distance_m / psc
+            distance_kpc = distance_pc / 1e3
+            distance_mpc = distance_pc / 1e6
+            distance_ly = distance_m / ly
+
+            result_label.config(
+                text=(
+                    f"Redshift: z = {z:g}\n\n"
+                    f"Proper distance today:\n"
+                    f"{distance_mpc:,.3f} Mpc\n"
+                    f"{distance_ly / 1e9:,.3f} billion ly\n\n"
+                    f"Distance in parsecs:\n"
+                    f"{distance_pc:,.3e} pc\n\n"
+                    f"Distance in meters:\n"
+                    f"{distance_m:,.3e} m"
+                )
+            )
+
+        except ValueError:
+            result_label.config(
+                text="Please enter a valid non-negative redshift."
+            )
+
+    ttk.Button(
+        window,
+        text="Calculate",
+        command=calculate
+    ).pack(pady=10)
+
+    z_entry.bind("<Return>", calculate)
+    z_entry.focus()
+
+
+
+
 
 def draw_central_body(canvas, cx, cy, body_radius_m,  scale, color, min_px=4, max_px=160):
 
@@ -277,6 +395,10 @@ def relativistic_kinetic_energy_UI(root):
         text="Calculate",
         command=calculate
     ).grid(row=2,column=0,columnspan=2)
+
+
+
+
 
 
 def relativistic_kinetic_energy_UI2(root):
@@ -1108,7 +1230,7 @@ def orbit_visualizer_UI2(root):
     update_mode()
 
     # ---- Calculate + draw ----
-    def calculate():
+    def calculate(CANVAS_SIZE=none):
         try:
             peri_km = float(peri_entry.get())
         except ValueError:
