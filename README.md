@@ -1,42 +1,100 @@
-🌌 AstroCalc
-AstroCalc is a lightweight Python desktop application for astrodynamics and astronomy calculations, with a strong focus on orbital mechanics visualisation.
-It’s designed to be fast, self-contained, and practical, avoiding heavy scientific libraries while still providing accurate, physically-based results.
+# 🌌 AstroCalc
 
-===== ✨ Features =====
+AstroCalc is a Python desktop application for astronomy, astrophysics, orbital mechanics, and spaceflight calculations. It provides practical, physically based tools through a tabbed Tkinter interface.
 
-          
-           🛰 Orbital Mechanics
+> AstroCalc is intended for education, exploration, and approximate analysis. It is not a mission-planning or high-precision ephemeris tool.
 
-- Orbit Visualizer
+## Features
 
-- Elliptical, circular, and hyperbolic orbits
+### Physics & Relativity
 
-- Multiple input modes (altitude-based and velocity-based)
+- Relativistic kinetic-energy calculator
+- Particle mass-energy calculator
+- Photon energy and electromagnetic-spectrum calculator
+- Schwarzschild-radius calculator
 
-- Physically scaled central bodies (with visibility clamping)
+### Orbits & Spaceflight
 
-- Solar system and Earth–Moon reference modes
+- Hohmann transfer ΔV calculator with orbit visualisation
+- Two-body orbit visualizer for Earth and Sun
+  - apoapsis/periapsis input mode
+  - periapsis-velocity input mode
+  - elliptic, parabolic, and hyperbolic trajectories
+  - optional Earth-Moon and Solar System reference orbits
+- Multi-stage rocket ΔV and burn-time calculator
+- Roche-limit calculator
 
-- Hohmann Transfer Calculator
+### Stellar Astronomy
 
-- ΔV₁, ΔV₂, and total ΔV breakdown
-Visualised initial, transfer, and final orbits
+- Stellar magnitude calculator
+- Stellar spectral-class and peak-wavelength calculator
+- Parallax-distance calculator
 
-- Rocket ΔV Calculator
+### Cosmology
 
-- Classical Tsiolkovsky rocket equation
+- Redshift-distance calculator using the Astropy `Planck15` cosmology model
 
+## Interface
 
-        🌌 Astronomy & Astrophysics
+AstroCalc opens to a dashboard with four calculator categories:
 
-- Photon Energy / Spectrum Calculator
+- Physics & Relativity
+- Orbits & Spaceflight
+- Stellar Astronomy
+- Cosmology
 
-- Stellar Magnitude Calculator
+Calculators open in tabs within the same application window. Selecting an already-open calculator focuses its existing tab, and each calculator tab can be closed individually.
 
-- Stellar Spectral Classification Tool
+## Requirements
 
-- Schwarzschild Radius Calculator
+- Python 3.10 or newer recommended
+- Tkinter
+- SciPy
+- Astropy
 
-- Roche Limit Calculator
+Install the external dependencies:
 
-- Parallax Distance Calculator
+```powershell
+python -m pip install scipy astropy
+```
+
+Tkinter is normally included with standard Python installations on Windows.
+
+## Running AstroCalc
+
+From the project folder:
+
+```powershell
+python ACmain.py
+```
+
+## Project structure
+
+```text
+AstroCalc/
+├── ACmain.py   # Application launcher, dashboard, menus, and tab management
+├── aclib.py    # Calculator logic, visualisation helpers, and UI builders
+└── README.md
+```
+
+## Notes on models and units
+
+- Inputs and outputs use SI units unless a field explicitly states another unit.
+- Hohmann transfers assume ideal, coplanar circular orbits.
+- The Orbit Visualizer uses an ideal two-body Keplerian model.
+- Redshift distance is based on the Planck15 cosmology model.
+- Results are approximate and depend on the assumptions of each calculator.
+
+## Planned tools
+
+The interface includes placeholders for future features, including:
+
+- Relativistic speed / kinetic-energy analysis
+- Patched-conics gravity-assist visualizer
+- Orbit analysis
+- Stellar-distance estimation
+- Stellar constants and additional stellar tools
+
+## License
+
+No license has been specified yet.

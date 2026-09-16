@@ -3,71 +3,104 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
+tool_tabs = {}
+
+
+def close_tool_tab(key):
+    tab = tool_tabs.pop(key, None)
+    if tab is None or not tab.winfo_exists():
+        return
+
+    notebook.forget(tab)
+    tab.destroy()
+    notebook.select(dashboard)
+
+
+def open_tool_tab(key, title, builder):
+    existing_tab = tool_tabs.get(key)
+    if existing_tab is not None and existing_tab.winfo_exists():
+        notebook.select(existing_tab)
+        return
+
+    tool_tabs.pop(key, None)
+    tab = ttk.Frame(notebook)
+    tab.columnconfigure(0, weight=1)
+    tab.rowconfigure(2, weight=1)
+
+    header = ttk.Frame(tab, padding=(24, 16, 24, 8))
+    header.grid(row=0, column=0, sticky="ew")
+    header.columnconfigure(0, weight=1)
+    ttk.Label(header, text=title, style="ToolTitle.TLabel").grid(
+        row=0, column=0, sticky="w"
+    )
+    ttk.Button(
+        header,
+        text="Close tab",
+        command=lambda: close_tool_tab(key),
+    ).grid(row=0, column=1, sticky="e")
+    ttk.Separator(tab).grid(row=1, column=0, sticky="ew")
+
+    content = ttk.Frame(tab, padding=(20, 12))
+    content.grid(row=2, column=0, sticky="nsew")
+
+    tool_tabs[key] = tab
+    notebook.add(tab, text=title)
+    notebook.select(tab)
+    builder(content)
+
 
 def open_rel_kin_energy():
-    rel_kin_energy_window = tk.Toplevel(root)
-    mfc.relativistic_kinetic_energy_UI2(rel_kin_energy_window)
+    open_tool_tab("relativistic_energy", "Relativistic Kinetic Energy", mfc.relativistic_kinetic_energy_UI2)
 
 
 def open_mass_energy():
-    mass_energy_window = tk.Toplevel(root)
-    mfc.relativistic_kinetic_energy_UI4(mass_energy_window)
+    open_tool_tab("mass_energy", "Mass-Energy Calculator", mfc.relativistic_kinetic_energy_UI4)
 
 
 def open_photon_energy_spectrum():
-    photon_energy_spectrum_window = tk.Toplevel(root)
-    mfc.photon_energy_spectrum_UI(photon_energy_spectrum_window)
+    open_tool_tab("photon_spectrum", "Photon Energy / Spectrum", mfc.photon_energy_spectrum_UI)
 
 
 def open_parallaxe_distance():
-    parallaxe_distance_window = tk.Toplevel(root)
-    mfc.parallaxe_distance_UI2(parallaxe_distance_window)
+    open_tool_tab("parallax_distance", "Parallax Distance", mfc.parallaxe_distance_UI2)
 
 
 def open_schwarzschild_radius():
-    schwarzschild_radius_window = tk.Toplevel(root)
-    mfc.schwarzschild_radius_UI2(schwarzschild_radius_window)
+    open_tool_tab("schwarzschild_radius", "Schwarzschild Radius", mfc.schwarzschild_radius_UI2)
 
 
 def open_spectral_class():
-    spectral_class_window = tk.Toplevel(root)
-    mfc.spectral_class3_UI(spectral_class_window)
+    open_tool_tab("stellar_spectrum", "Stellar Spectrum", mfc.spectral_class3_UI)
 
 
 def open_hohmann_transfer():
-    hohman_transfer_window = tk.Toplevel(root)
-    mfc.hohmann_transfer_UI4(hohman_transfer_window)
+    open_tool_tab("hohmann_transfer", "Hohmann Transfer", mfc.hohmann_transfer_UI4)
 
 
 def open_rocket_dV():
-    rocket_dV_window = tk.Toplevel(root)
-    mfc.rocket_deltaV_UI5(rocket_dV_window)
+    open_tool_tab("rocket_delta_v", "Rocket DeltaV", mfc.rocket_deltaV_UI5)
 
 
 def open_stellar_mag():
-    stellar_mag_window = tk.Toplevel(root)
-    mfc.stellar_magnitude_UI2(stellar_mag_window)
+    open_tool_tab("stellar_magnitude", "Stellar Magnitude", mfc.stellar_magnitude_UI2)
 
 
 def open_roche_limit():
-    roche_limit_window = tk.Toplevel(root)
-    mfc.roche_limit_UI(roche_limit_window)
+    open_tool_tab("roche_limit", "Roche Limit", mfc.roche_limit_UI)
 
 
 def open_orbit_visualizer():
-    orbit_visualizer_window = tk.Toplevel(root)
-    mfc.orbit_visualizer_UI3(orbit_visualizer_window)
+    open_tool_tab("orbit_visualizer", "Orbit Visualizer", mfc.orbit_visualizer_UI3)
 
 
 def open_redshift_distance():
-    redshift_distance_window = tk.Toplevel(root)
-    mfc.redshift_distance_UI(redshift_distance_window)
+    open_tool_tab("redshift_distance", "Redshift Distance", mfc.redshift_distance_UI)
 
 
 root = tk.Tk()
 root.title("AstroCalc 0.3.4")
-root.geometry("760x480")
-root.minsize(650, 420)
+root.geometry("900x700")
+root.minsize(760, 580)
 
 # Scale the shared Tk named fonts so existing calculator windows remain readable.
 tkfont.nametofont("TkDefaultFont").configure(size=14)
@@ -81,6 +114,7 @@ style.configure("Title.TLabel", font=("TkDefaultFont", 26, "bold"))
 style.configure("Subtitle.TLabel", font=("TkDefaultFont", 13))
 style.configure("Category.TMenubutton", font=("TkDefaultFont", 15, "bold"), padding=(20, 16))
 style.configure("Footer.TLabel", font=("TkDefaultFont", 11))
+style.configure("ToolTitle.TLabel", font=("TkDefaultFont", 18, "bold"))
 
 
 # Create the menu
@@ -214,10 +248,13 @@ spaceflight_menu.add_command(
 
 
 # Main dashboard. The menu bar remains available as secondary navigation.
-dashboard = ttk.Frame(root, padding=32)
-dashboard.grid(sticky="nsew")
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)
+notebook = ttk.Notebook(root)
+notebook.grid(row=0, column=0, sticky="nsew")
+
+dashboard = ttk.Frame(notebook, padding=32)
+notebook.add(dashboard, text="Dashboard")
 dashboard.columnconfigure(0, weight=1)
 dashboard.columnconfigure(1, weight=1)
 

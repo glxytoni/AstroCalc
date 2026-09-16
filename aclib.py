@@ -153,8 +153,6 @@ def redshift_to_proper_distance(z):
 def redshift_distance_UI(root):
 
     window = root
-    window.title("Redshift Distance")
-    window.geometry("600x500")
 
     input_frame = tk.Frame(window)
     input_frame.pack(pady=20)
@@ -1316,225 +1314,398 @@ def orbit_visualizer_UI2(root):
 
     tk.Button(frame, text="Draw Orbit", command=calculate).pack(pady=6)
 
+def calculate_orbit_from_apsides(mu, body_radius, periapsis_km, apoapsis_km):
+    """Return two-body orbital parameters from periapsis and apoapsis altitudes."""
+    if periapsis_km < 0 or apoapsis_km < 0:
+        raise ValueError("Altitudes must be at or above the body's surface.")
+    if apoapsis_km < periapsis_km:
+        raise ValueError("Apoapsis altitude must be at least the periapsis altitude.")
+
+    r_p = body_radius + periapsis_km * 1000
+    r_a = body_radius + apoapsis_km * 1000
+    semi_major_axis = (r_p + r_a) / 2
+    eccentricity = (r_a - r_p) / (r_a + r_p)
+    periapsis_velocity = math.sqrt(mu * (2 / r_p - 1 / semi_major_axis))
+    apoapsis_velocity = math.sqrt(mu * (2 / r_a - 1 / semi_major_axis))
+
+    return {
+        "type": "Elliptic",
+        "periapsis_altitude": periapsis_km,
+        "apoapsis_altitude": apoapsis_km,
+        "r_p": r_p,
+        "r_a": r_a,
+        "a": semi_major_axis,
+        "e": eccentricity,
+        "p": semi_major_axis * (1 - eccentricity ** 2),
+        "v_p": periapsis_velocity,
+        "v_a": apoapsis_velocity,
+        "period": 2 * math.pi * math.sqrt(semi_major_axis ** 3 / mu),
+        "escape_velocity": math.sqrt(2 * mu / r_p),
+        "display_radius": r_a,
+    }
+
+
+def calculate_orbit_from_periapsis_velocity(mu, body_radius, periapsis_km, velocity_kms):
+    """Return two-body orbital parameters when the supplied point is periapsis."""
+    if periapsis_km < 0:
+        raise ValueError("Periapsis altitude must be at or above the body's surface.")
+    if velocity_kms <= 0:
+        raise ValueError("Velocity must be greater than zero.")
+
+    r_p = body_radius + periapsis_km * 1000
+    v_p = velocity_kms * 1000
+    circular_velocity = math.sqrt(mu / r_p)
+    escape_velocity = math.sqrt(2 * mu / r_p)
+    tolerance = 1e-9 * escape_velocity
+
+    if v_p < circular_velocity - tolerance:
+        raise ValueError("Velocity at periapsis must be at least the circular velocity.")
+
+    eccentricity = r_p * v_p ** 2 / mu - 1
+
+    if abs(v_p - escape_velocity) <= tolerance:
+        return {
+            "type": "Parabolic",
+            "periapsis_altitude": periapsis_km,
+            "apoapsis_altitude": None,
+            "r_p": r_p,
+            "r_a": None,
+            "a": None,
+            "e": 1.0,
+            "p": 2 * r_p,
+            "v_p": v_p,
+            "v_a": None,
+            "period": None,
+            "escape_velocity": escape_velocity,
+            "display_radius": r_p * 8,
+        }
+
+    semi_major_axis = r_p / (1 - eccentricity)
+    if eccentricity < 1:
+        r_a = semi_major_axis * (1 + eccentricity)
+        return {
+            "type": "Elliptic",
+            "periapsis_altitude": periapsis_km,
+            "apoapsis_altitude": (r_a - body_radius) / 1000,
+            "r_p": r_p,
+            "r_a": r_a,
+            "a": semi_major_axis,
+            "e": eccentricity,
+            "p": semi_major_axis * (1 - eccentricity ** 2),
+            "v_p": v_p,
+            "v_a": math.sqrt(mu * (2 / r_a - 1 / semi_major_axis)),
+            "period": 2 * math.pi * math.sqrt(semi_major_axis ** 3 / mu),
+            "escape_velocity": escape_velocity,
+            "display_radius": r_a,
+        }
+
+    return {
+        "type": "Hyperbolic",
+        "periapsis_altitude": periapsis_km,
+        "apoapsis_altitude": None,
+        "r_p": r_p,
+        "r_a": None,
+        "a": semi_major_axis,
+        "e": eccentricity,
+        "p": semi_major_axis * (1 - eccentricity ** 2),
+        "v_p": v_p,
+        "v_a": None,
+        "period": None,
+        "escape_velocity": escape_velocity,
+        "v_infinity": math.sqrt(v_p ** 2 - escape_velocity ** 2),
+        "display_radius": r_p * 8,
+    }
+
+
+def draw_orbit_trajectory(canvas, orbit, scale, cx, cy):
+    """Draw a conic safely, including bounded views of escape trajectories."""
+    eccentricity = orbit["e"]
+    semi_latus_rectum = orbit["p"]
+    max_radius = orbit["display_radius"]
+
+    if orbit["type"] == "Elliptic":
+        theta_min, theta_max = 0.0, 2 * math.pi
+    else:
+        cosine_limit = (semi_latus_rectum / max_radius - 1) / eccentricity
+        cosine_limit = max(-1.0, min(1.0, cosine_limit))
+        theta_max = math.acos(cosine_limit)
+        theta_min = -theta_max
+
+    points = []
+    steps = 600
+    for index in range(steps + 1):
+        theta = theta_min + (theta_max - theta_min) * index / steps
+        denominator = 1 + eccentricity * math.cos(theta)
+        if denominator <= 0:
+            continue
+
+        radius = semi_latus_rectum / denominator
+        if radius <= 0 or radius > max_radius * 1.001:
+            continue
+
+        points.extend((
+            cx + radius * math.cos(theta) * scale,
+            cy - radius * math.sin(theta) * scale,
+        ))
+
+    if len(points) > 4:
+        canvas.create_line(
+            points,
+            fill="white",
+            width=2,
+            smooth=True,
+            dash=(6, 4) if orbit["type"] != "Elliptic" else None,
+        )
+
+
+def format_orbit_results(orbit):
+    """Format values for the Orbit Visualizer results panel."""
+    lines = [
+        f"Orbit type: {orbit['type']}",
+        f"Eccentricity: {orbit['e']:.6f}",
+        f"Periapsis altitude: {orbit['periapsis_altitude']:.3f} km",
+        f"Periapsis velocity: {orbit['v_p'] / 1000:.4f} km/s",
+        f"Escape velocity at periapsis: {orbit['escape_velocity'] / 1000:.4f} km/s",
+    ]
+
+    if orbit["type"] == "Elliptic":
+        lines.extend((
+            f"Apoapsis altitude: {orbit['apoapsis_altitude']:.3f} km",
+            f"Semi-major axis: {orbit['a'] / 1000:.3f} km",
+            f"Apoapsis velocity: {orbit['v_a'] / 1000:.4f} km/s",
+            f"Orbital period: {orbit['period'] / 60:.2f} min",
+        ))
+    elif orbit["type"] == "Parabolic":
+        lines.append("Trajectory: escape threshold (no orbital period)")
+    else:
+        lines.extend((
+            f"Semi-major axis: {orbit['a'] / 1000:.3f} km",
+            f"Hyperbolic excess velocity: {orbit['v_infinity'] / 1000:.4f} km/s",
+            "Trajectory: unbound (no orbital period)",
+        ))
+
+    return "\n".join(lines)
+
+
+def format_orbit_summary(orbit):
+    """Return the compact result view shown below the orbit canvas."""
+    summary = [
+        f"Orbit: {orbit['type']}",
+        f"Eccentricity: {orbit['e']:.6f}",
+    ]
+    if orbit["type"] == "Elliptic":
+        summary.extend((
+            f"Semi-major axis: {orbit['a'] / 1000:.3f} km",
+            f"Period: {orbit['period'] / 60:.2f} min",
+        ))
+    elif orbit["type"] == "Parabolic":
+        summary.append("Escape threshold")
+    else:
+        summary.append(f"v∞: {orbit['v_infinity'] / 1000:.4f} km/s")
+
+    return "   •   ".join(summary)
+
+
 def orbit_visualizer_UI3(root):
-
-    # ---- Clear UI ----
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
-
-    # ---- Central bodies ----
+    """Build the first-pass tab-native Orbit Visualizer."""
     bodies = {
-        "Sun": (1.32712440018e20, 6.9634e8, "solar"),
-        "Earth": (3.986004418e14, 6.371e6, "earth_moon"),
+        "Earth": {
+            "mu": 3.986004418e14,
+            "radius": 6.371e6,
+            "reference_mode": "earth_moon",
+            "color": "#2B6FFF",
+        },
+        "Sun": {
+            "mu": 1.32712440018e20,
+            "radius": 6.9634e8,
+            "reference_mode": "solar",
+            "color": "#FFD54A",
+        },
     }
 
     selected_body = tk.StringVar(value="Earth")
-    input_mode = tk.StringVar(value="Apo/Peri")
+    input_mode = tk.StringVar(value="apsides")
+    show_reference = tk.BooleanVar(value=True)
+    result_summary = tk.StringVar(value="Enter orbit parameters, then calculate the trajectory.")
+    result_details = tk.StringVar(value="")
+    details_visible = tk.BooleanVar(value=False)
+    current = {"orbit": None, "body": None}
+    resize_job = [None]
 
-    # ---- Main frame ----
-    frame = tk.Frame(root)
-    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+    page = ttk.Frame(root)
+    page.grid(sticky="nsew")
+    page.columnconfigure(0, weight=0)
+    page.columnconfigure(1, weight=1)
+    page.rowconfigure(0, weight=1)
 
-    # ---- Controls ----
-    top = tk.Frame(frame)
-    top.pack(anchor="w")
+    setup = ttk.LabelFrame(page, text="Orbit setup", padding=16)
+    setup.grid(row=0, column=0, sticky="nsw", padx=(0, 16))
+    view = ttk.LabelFrame(page, text="Orbit view", padding=12)
+    view.grid(row=0, column=1, sticky="nsew")
 
-    tk.Label(top, text="Central body:").pack(side=tk.LEFT)
-
-    tk.OptionMenu(
-        top,
-        selected_body,
-        *bodies.keys()
-    ).pack(side=tk.LEFT, padx=5)
-
-    tk.Label(
-        top,
-        text="Input mode:"
-    ).pack(side=tk.LEFT, padx=(20, 0))
-
-    tk.OptionMenu(
-        top,
-        input_mode,
-        "Apo/Peri",
-        "Velocity @ Periapsis"
-    ).pack(side=tk.LEFT)
-
-    # ---- Inputs ----
-    input_frame = tk.Frame(frame)
-    input_frame.pack(anchor="w", pady=10)
-
-    def make_entry(label):
-        row = tk.Frame(input_frame)
-        row.pack(anchor="w", pady=4)
-
-        tk.Label(
-            row,
-            text=label,
-            width=28,
-            anchor="w"
-        ).pack(side=tk.LEFT)
-
-        entry = tk.Entry(row, width=18)
-        entry.pack(side=tk.LEFT)
-
-        return entry
-
-    peri_entry = make_entry("Periapsis altitude [km]:")
-    apo_entry = make_entry("Apoapsis altitude [km]:")
-    vel_entry = make_entry("Velocity at periapsis [km/s]:")
-
-    # ---- Canvas ----
-    canvas = tk.Canvas(
-        frame,
-        width=CANVAS_SIZE,
-        height=CANVAS_SIZE,
-        bg="black"
+    ttk.Label(setup, text="Central body:").grid(row=0, column=0, sticky="w")
+    body_box = ttk.Combobox(
+        setup,
+        textvariable=selected_body,
+        values=tuple(bodies),
+        state="readonly",
+        width=18,
     )
-    canvas.pack(pady=10)
+    body_box.grid(row=1, column=0, sticky="ew", pady=(4, 16))
 
-    result_label = tk.Label(
-        frame,
-        justify=tk.LEFT
+    ttk.Label(setup, text="Input mode:").grid(row=2, column=0, sticky="w")
+    ttk.Radiobutton(
+        setup,
+        text="Apoapsis / periapsis",
+        variable=input_mode,
+        value="apsides",
+    ).grid(row=3, column=0, sticky="w", pady=(4, 2))
+    ttk.Radiobutton(
+        setup,
+        text="Velocity at periapsis",
+        variable=input_mode,
+        value="velocity",
+    ).grid(row=4, column=0, sticky="w", pady=(0, 16))
+
+    ttk.Label(setup, text="Periapsis altitude [km]:").grid(row=5, column=0, sticky="w")
+    peri_entry = ttk.Entry(setup, width=22)
+    peri_entry.grid(row=6, column=0, sticky="ew", pady=(4, 12))
+
+    ttk.Label(setup, text="Apoapsis altitude [km]:").grid(row=7, column=0, sticky="w")
+    apo_entry = ttk.Entry(setup, width=22)
+    apo_entry.grid(row=8, column=0, sticky="ew", pady=(4, 12))
+
+    ttk.Label(setup, text="Velocity at periapsis [km/s]:").grid(row=9, column=0, sticky="w")
+    velocity_entry = ttk.Entry(setup, width=22)
+    velocity_entry.grid(row=10, column=0, sticky="ew", pady=(4, 16))
+
+    canvas = tk.Canvas(view, width=360, height=360, bg="black", highlightthickness=0)
+    canvas.grid(row=0, column=0, sticky="nsew")
+    view.columnconfigure(0, weight=1)
+    view.rowconfigure(0, weight=1)
+    ttk.Checkbutton(
+        view,
+        text="Show reference orbits",
+        variable=show_reference,
+        command=lambda: render_orbit(),
+    ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(
+        view,
+        text="White: selected orbit   •   Grey: reference orbits",
+    ).grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+    result_card = ttk.LabelFrame(view, text="Results", padding=10)
+    result_card.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+    result_card.columnconfigure(0, weight=1)
+    ttk.Label(result_card, textvariable=result_summary, justify=tk.LEFT, wraplength=520).grid(
+        row=0, column=0, sticky="w"
     )
-    result_label.pack(anchor="w")
+    details_button = ttk.Button(result_card, text="Show detailed results")
+    details_button.grid(row=1, column=0, sticky="w", pady=(8, 0))
+    details_frame = ttk.Frame(result_card)
+    ttk.Label(details_frame, textvariable=result_details, justify=tk.LEFT).grid(sticky="w")
+    details_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+    details_frame.grid_remove()
 
-    # ---- Mode switching ----
-    def update_mode(*args):
-        if input_mode.get() == "Apo/Peri":
-            apo_entry.config(state="normal")
-            vel_entry.config(state="disabled")
+    def toggle_details():
+        if details_visible.get():
+            details_frame.grid_remove()
+            details_button.config(text="Show detailed results")
+            details_visible.set(False)
         else:
-            apo_entry.config(state="disabled")
-            vel_entry.config(state="normal")
+            details_frame.grid()
+            details_button.config(text="Hide detailed results")
+            details_visible.set(True)
 
-    input_mode.trace_add("write", update_mode)
-    update_mode()
+    details_button.config(command=toggle_details)
 
-    # ---- Calculate + draw ----
-    def calculate():
-        try:
-            peri_km = float(peri_entry.get())
-        except ValueError:
-            result_label.config(text="Invalid periapsis input.")
+    def update_mode(*_):
+        if input_mode.get() == "apsides":
+            apo_entry.state(["!disabled"])
+            velocity_entry.state(["disabled"])
+        else:
+            apo_entry.state(["disabled"])
+            velocity_entry.state(["!disabled"])
+
+    def render_orbit():
+        resize_job[0] = None
+        orbit = current["orbit"]
+        body = current["body"]
+        if orbit is None or body is None:
             return
 
-        body_mu, body_radius, mode = bodies[selected_body.get()]
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        canvas_size = min(width, height)
+        center_x = width / 2
+        center_y = height / 2
+        scale = compute_orbit_scale(canvas_size, [orbit["display_radius"]], padding=35)
 
-        r_p = body_radius + peri_km * 1000
-
-        # ---- Determine orbit from mode ----
-        if input_mode.get() == "Apo/Peri":
-            try:
-                apo_km = float(apo_entry.get())
-            except ValueError:
-                result_label.config(text="Invalid apoapsis input.")
-                return
-
-            r_a = body_radius + apo_km * 1000
-
-            a = (r_p + r_a) / 2
-            e = abs(r_a - r_p) / (r_a + r_p)
-
-        else:
-            try:
-                v_p = float(vel_entry.get()) * 1000
-            except ValueError:
-                result_label.config(text="Invalid velocity input.")
-                return
-
-            inv_a = 2 / r_p - v_p**2 / body_mu
-
-            if abs(inv_a) < 1e-12:
-                a = float("inf")
-                e = 1.0
-            else:
-                a = 1 / inv_a
-                e = abs(1 - r_p / a)
-
-        # ---- Drawing ----
         canvas.delete("all")
+        draw_central_body(canvas, center_x, center_y, body["radius"], scale, body["color"])
+        if show_reference.get():
+            draw_reference_orbits(canvas, body["reference_mode"], scale, center_x, center_y)
+        draw_orbit_trajectory(canvas, orbit, scale, center_x, center_y)
 
-        cx = CANVAS_SIZE / 2
-        cy = CANVAS_SIZE / 2
+    def queue_resize_redraw(_event):
+        if current["orbit"] is None:
+            return
+        if resize_job[0] is not None:
+            canvas.after_cancel(resize_job[0])
+        resize_job[0] = canvas.after(60, render_orbit)
 
-        if math.isinf(a):
-            max_r = r_p * 2
-        else:
-            max_r = max(
-                r_p * 2,
-                abs(a) * (1 + e)
-            )
+    def draw_orbit():
+        try:
+            periapsis_km = float(peri_entry.get())
+            body = bodies[selected_body.get()]
+            if input_mode.get() == "apsides":
+                orbit = calculate_orbit_from_apsides(
+                    body["mu"], body["radius"], periapsis_km, float(apo_entry.get())
+                )
+            else:
+                orbit = calculate_orbit_from_periapsis_velocity(
+                    body["mu"], body["radius"], periapsis_km, float(velocity_entry.get())
+                )
+        except ValueError as error:
+            result_summary.set(f"Error: {error}")
+            result_details.set("")
+            return
 
-        scale = compute_orbit_scale(
-            CANVAS_SIZE,
-            [max_r]
-        )
+        current["orbit"] = orbit
+        current["body"] = body
+        result_summary.set(format_orbit_summary(orbit))
+        result_details.set(format_orbit_results(orbit))
+        render_orbit()
 
-        # ---- Central body ----
-        body_color = (
-            "yellow"
-            if selected_body.get() == "Sun"
-            else "blue"
-        )
+    def reset():
+        selected_body.set("Earth")
+        input_mode.set("apsides")
+        show_reference.set(True)
+        for entry in (peri_entry, apo_entry, velocity_entry):
+            entry.delete(0, tk.END)
+        canvas.delete("all")
+        current["orbit"] = None
+        current["body"] = None
+        result_summary.set("Enter orbit parameters, then calculate the trajectory.")
+        result_details.set("")
+        if details_visible.get():
+            toggle_details()
+        update_mode()
+        peri_entry.focus()
 
-        draw_central_body(
-            canvas,
-            cx,
-            cy,
-            body_radius,
-            scale,
-            color=body_color
-        )
+    button_row = ttk.Frame(setup)
+    button_row.grid(row=11, column=0, sticky="ew")
+    ttk.Button(button_row, text="Calculate & Draw Orbit", command=draw_orbit).pack(side=tk.LEFT)
+    ttk.Button(button_row, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
 
-        # ---- Reference orbits ----
-        draw_reference_orbits(
-            canvas,
-            mode,
-            scale,
-            cx,
-            cy
-        )
-
-        # ---- User orbit ----
-        draw_kepler_orbit(
-            canvas,
-            a,
-            e,
-            scale,
-            cx,
-            cy,
-            color="white"
-        )
-
-        # ---- Orbit type ----
-        if e < 1:
-            orbit_type = "Elliptic"
-        elif abs(e - 1) < 1e-3:
-            orbit_type = "Parabolic"
-        else:
-            orbit_type = "Hyperbolic"
-
-        # ---- Results ----
-        if math.isinf(a):
-            semi_major_axis = "∞"
-        else:
-            semi_major_axis = f"{a / 1000:.3f} km"
-
-        result_label.config(
-            text=(
-                f"Orbit type: {orbit_type}\n"
-                f"Semi-major axis: {semi_major_axis}\n"
-                f"Eccentricity: {e:.5f}"
-            )
-        )
-
-    # ---- Draw button ----
-    tk.Button(
-        frame,
-        text="Draw Orbit",
-        command=calculate
-    ).pack(pady=6)
+    input_mode.trace_add("write", update_mode)
+    canvas.bind("<Configure>", queue_resize_redraw)
+    for entry in (peri_entry, apo_entry, velocity_entry):
+        entry.bind("<Return>", lambda _event: draw_orbit())
+    update_mode()
+    peri_entry.focus()
 
 
 
