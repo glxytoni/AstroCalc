@@ -1,5 +1,6 @@
 import aclib as mfc
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 
@@ -55,7 +56,7 @@ def open_roche_limit():
 
 def open_orbit_visualizer():
     orbit_visualizer_window = tk.Toplevel(root)
-    mfc.orbit_visualizer_UI2(orbit_visualizer_window)
+    mfc.orbit_visualizer_UI3(orbit_visualizer_window)
 
 
 def open_redshift_distance():
@@ -64,13 +65,22 @@ def open_redshift_distance():
 
 
 root = tk.Tk()
-root.title("Astrocalc0.3.3")
+root.title("AstroCalc 0.3.4")
+root.geometry("760x480")
+root.minsize(650, 420)
 
-root.option_add("*Font", "TkDefaultFont 20")
-root.option_add("*Label.Font", "TkDefaultFont 20")
-root.option_add("*MenuButton.Font", "TkDefaultFont 20")
+# Scale the shared Tk named fonts so existing calculator windows remain readable.
+tkfont.nametofont("TkDefaultFont").configure(size=14)
+tkfont.nametofont("TkTextFont").configure(size=14)
+tkfont.nametofont("TkMenuFont").configure(size=13)
 
-root.geometry("500x350")
+style = ttk.Style(root)
+if "clam" in style.theme_names():
+    style.theme_use("clam")
+style.configure("Title.TLabel", font=("TkDefaultFont", 26, "bold"))
+style.configure("Subtitle.TLabel", font=("TkDefaultFont", 13))
+style.configure("Category.TMenubutton", font=("TkDefaultFont", 15, "bold"), padding=(20, 16))
+style.configure("Footer.TLabel", font=("TkDefaultFont", 11))
 
 
 # Create the menu
@@ -201,6 +211,94 @@ spaceflight_menu.add_command(
     label="Rocket DeltaV",
     command=open_rocket_dV
 )
+
+
+# Main dashboard. The menu bar remains available as secondary navigation.
+dashboard = ttk.Frame(root, padding=32)
+dashboard.grid(sticky="nsew")
+root.columnconfigure(0, weight=1)
+root.rowconfigure(0, weight=1)
+dashboard.columnconfigure(0, weight=1)
+dashboard.columnconfigure(1, weight=1)
+
+ttk.Label(dashboard, text="AstroCalc", style="Title.TLabel").grid(
+    row=0, column=0, columnspan=2, sticky="w"
+)
+ttk.Label(
+    dashboard,
+    text="Astronomy, physics, orbital-mechanics, and propulsion calculators",
+    style="Subtitle.TLabel",
+).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 28))
+
+categories = (
+    (
+        "Physics & Relativity",
+        (
+            ("Relativistic Kinetic Energy", open_rel_kin_energy),
+            ("Mass-Energy Calculator", open_mass_energy),
+            ("Photon Energy / Spectrum", open_photon_energy_spectrum),
+            ("Schwarzschild Radius", open_schwarzschild_radius),
+            ("Relativistic Speed Kinetic Energy [Coming soon]", None),
+        ),
+    ),
+    (
+        "Orbits & Spaceflight",
+        (
+            ("Hohmann Transfer", open_hohmann_transfer),
+            ("Orbit Visualizer", open_orbit_visualizer),
+            ("Roche Limit", open_roche_limit),
+            ("Rocket DeltaV", open_rocket_dV),
+            ("Patched-Conics Gravity Assist [Coming soon]", None),
+            ("Orbit Analysis [Coming soon]", None),
+        ),
+    ),
+    (
+        "Stellar Astronomy",
+        (
+            ("Stellar Magnitude", open_stellar_mag),
+            ("Stellar Spectrum", open_spectral_class),
+            ("Parallax Distance", open_parallaxe_distance),
+            ("Stellar Distance Estimation [Coming soon]", None),
+            ("Stellar Constant [Coming soon]", None),
+        ),
+    ),
+    (
+        "Cosmology",
+        (("Hubble Expansion via Redshift", open_redshift_distance),),
+    ),
+)
+
+for index, (category_name, tools) in enumerate(categories):
+    row, column = divmod(index, 2)
+    category_button = ttk.Menubutton(
+        dashboard,
+        text=f"{category_name}  ▾",
+        style="Category.TMenubutton",
+    )
+    category_menu = tk.Menu(category_button, tearoff=False)
+    for label, command in tools:
+        category_menu.add_command(
+            label=label,
+            command=command,
+            state=tk.NORMAL if command else tk.DISABLED,
+        )
+    category_button.configure(menu=category_menu)
+    category_button.grid(
+        row=row + 2,
+        column=column,
+        sticky="ew",
+        padx=8,
+        pady=8,
+    )
+
+ttk.Separator(dashboard).grid(
+    row=4, column=0, columnspan=2, sticky="ew", pady=(28, 10)
+)
+ttk.Label(
+    dashboard,
+    text="Choose a category to open a calculator. Units are SI by default.",
+    style="Footer.TLabel",
+).grid(row=5, column=0, columnspan=2, sticky="w")
 
 
 root.mainloop()
