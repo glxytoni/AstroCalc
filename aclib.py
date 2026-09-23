@@ -299,7 +299,7 @@ def draw_kepler_orbit(canvas, a, e, scale, cx, cy,
             dash=(6, 4) if e > 1 else None
         )
 
-def draw_reference_orbits(canvas, mode, scale, cx, cy):
+def draw_reference_orbits(canvas, mode, scale, cx, cy, clip_to_view=False):
     AU = 1.495978707e11
     moon_orbit = 384_400_000
 
@@ -316,6 +316,11 @@ def draw_reference_orbits(canvas, mode, scale, cx, cy):
 
     if mode == "solar":
         for r in solar_orbits:
+            if clip_to_view and r * scale > math.hypot(
+                max(abs(cx), abs(canvas.winfo_width() - cx)),
+                max(abs(cy), abs(canvas.winfo_height() - cy)),
+            ) + 2:
+                continue
             canvas.create_oval(
                 cx - r * scale,
                 cy - r * scale,
@@ -917,244 +922,386 @@ def relativistic_kinetic_energy_UI4(root):
     entry1.bind("<Return>", calculate)
 
 #====================================================================================
-def hohmann_transfer_UI4(root):
-    import tkinter as tk
-    import math
+def calculate_hohmann_transfer(mu, body_radius, start_km, target_km):
+    """Ideal coplanar circular transfer; SI results and signed tangential burns."""
+    if not all(math.isfinite(v) for v in (mu, body_radius, start_km, target_km)):
+        raise ValueError("Enter finite numbers.")
+    if mu <= 0 or body_radius <= 0 or start_km < 0 or target_km < 0:
+        raise ValueError("Altitudes must be at or above the body's surface.")
+    r1 = body_radius + start_km * 1000
+    r2 = body_radius + target_km * 1000
+    a = r1 / 2 + r2 / 2
+    v1, v2 = math.sqrt(mu / r1), math.sqrt(mu / r2)
+    vt1 = v1 * math.sqrt(r2 / a)
+    vt2 = v2 * math.sqrt(r1 / a)
+    no_transfer = r1 == r2
+    dv1 = 0.0 if no_transfer else vt1 - v1
+    dv2 = 0.0 if no_transfer else v2 - vt2
+    coast = 0.0 if no_transfer else math.pi * a * math.sqrt(a / mu)
+    if not all(math.isfinite(v) for v in (r1, r2, a, v1, v2, vt1, vt2, coast)):
+        raise ValueError("Values exceed the supported numeric range.")
+    direction = "None" if no_transfer else ("Prograde" if r2 > r1 else "Retrograde")
+    return {
+        "r1": r1, "r2": r2, "a": a, "b": math.sqrt(r1) * math.sqrt(r2),
+        "e": abs(r2 / a - r1 / a) / 2,
+        "v1": v1, "v2": v2, "vt1": vt1, "vt2": vt2,
+        "dv1": dv1, "dv2": dv2, "total_dv": abs(dv1) + abs(dv2),
+        "coast": coast, "direction": direction, "no_transfer": no_transfer,
+    }
 
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
 
-    selected_body = tk.StringVar(value="Earth")
+def hohmann_transfer_arc(transfer, steps=400):
+    """Travelled upper half-ellipse, from (+r1, 0) to (-r2, 0).
 
-    frame = tk.Frame(root)
-    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    body_frame = tk.Frame(frame)
-    body_frame.pack(anchor="w")
-
-    tk.Label(
-        body_frame,
-        text="Central body: "
-    ).pack(side=tk.LEFT)
-
-    tk.OptionMenu(
-        body_frame,
-        selected_body,
-        *[b.title() for b in SOLAR_SYSTEM.keys()]
-    ).pack(side=tk.LEFT)
-
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(anchor="w", pady=10)
-
-    labels = [
-        "Start Orbit Altitude [km]: ",
-        "Final Orbit Altitude [km]: "
+    The signed centre offset places departure at apoapsis for inward transfers.
+    Coordinates are in metres with the central body at the origin.
+    """
+    if transfer["no_transfer"]:
+        return []
+    offset = (transfer["r1"] - transfer["r2"]) / 2
+    points = [
+        (offset + transfer["a"] * math.cos(math.pi * i / steps),
+         transfer["b"] * math.sin(math.pi * i / steps))
+        for i in range(steps + 1)
     ]
-
-    entries = []
-
-    for text in labels:
-        row = tk.Frame(input_frame)
-        row.pack(anchor="w", pady=4)
-
-        tk.Label(
-            row,
-            text=text
-        ).pack(side=tk.LEFT)
-
-        e = tk.Entry(row, width=16)
-        e.pack(side=tk.LEFT)
-
-        entries.append(e)
-
-    start_alt_entry, final_alt_entry = entries
+    points[0] = (transfer["r1"], 0.0)
+    points[-1] = (-transfer["r2"], 0.0)
+    return points
 
 
-    CANVAS_SIZE = 420
+def hohmann_transfer_UI4(root):
+    """Scrollable Hohmann calculator with a zoomable transfer view."""
+    for widget in root.winfo_children():
+        widget.destroy()
 
-    canvas = tk.Canvas(
-        frame,
-        width=CANVAS_SIZE,
-        height=CANVAS_SIZE,
-        bg="black"
-    )
-    canvas.pack(pady=10)
+    style = ttk.Style(root)
+    style.configure("Hohmann.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("Hohmann.Error.TLabel", foreground="#a12622")
+    selected_body = tk.StringVar(master=root, value="Earth")
+    error_text = tk.StringVar(master=root)
+    detail_text = tk.StringVar(master=root)
+    zoom_text = tk.StringVar(master=root, value="100%")
+    values = {key: tk.StringVar(master=root, value="—")
+              for key in ("total", "time", "departure", "arrival")}
+    current = {"transfer": None, "body": None}
+    camera = {"zoom": 1.0, "x": 0.0, "y": 0.0, "drag": None}
+    redraw_job = [None]
 
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(shell, width=1, height=1, highlightthickness=0,
+                         background=style.lookup("TFrame", "background") or "#eeeeee")
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scroll = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scroll.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scroll.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+    page.bind("<Configure>", lambda _e: viewport.configure(scrollregion=viewport.bbox("all")))
 
-    result_label = tk.Label(
-        frame,
-        justify=tk.LEFT,
-        anchor="w"
-    )
-    result_label.pack(fill=tk.X, pady=6)
+    def wrap_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
 
+        def fit_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
 
-    def calculate():
+        label.bind("<Configure>", fit_text)
+        return label
 
-        try:
-            h1 = float(start_alt_entry.get()) * 1000
-            h2 = float(final_alt_entry.get()) * 1000
+    wrap_label(page, text="Transfer between two circular orbits around the same body.").grid(
+        row=0, column=0, sticky="ew", pady=(0, 16))
+    top = ttk.Frame(page)
+    top.grid(row=1, column=0, sticky="ew")
+    top.columnconfigure(1, weight=1)
+    inputs = ttk.LabelFrame(top, text="Inputs", padding=16)
+    inputs.grid(row=0, column=0, sticky="new", padx=(0, 16))
+    inputs.columnconfigure(0, weight=1)
+    view = ttk.LabelFrame(top, text="Transfer view", padding=12)
+    view.grid(row=0, column=1, sticky="nsew")
+    view.columnconfigure(0, weight=1)
 
-        except ValueError:
-            result_label.config(
-                text="Error: Invalid altitude input."
-            )
-            return
-
-
-        if h1 < 0 or h2 < 0:
-            result_label.config(
-                text="Error: Altitudes must be >= 0"
-            )
-            return
-
-
-        # -----------------------
-        # BODY LOOKUP
-        # -----------------------
-
-        body_key = selected_body.get().lower()
-
-        body = SOLAR_SYSTEM[body_key]
-
-        R = body["radius"]
-
-        mu = G * body["mass"]
-
-
-        # -----------------------
-        # ORBIT CALCULATIONS
-        # -----------------------
-
-        r1 = R + h1
-        r2 = R + h2
-
-
-        v1 = math.sqrt(mu / r1)
-        v2 = math.sqrt(mu / r2)
-
-
-        a_t = (r1 + r2) / 2
-
-        vtp = math.sqrt(
-            mu * (2/r1 - 1/a_t)
-        )
-
-        vta = math.sqrt(
-            mu * (2/r2 - 1/a_t)
-        )
-
-
-        dv1 = abs(vtp - v1)
-        dv2 = abs(v2 - vta)
-
-
-        result_label.config(
-            text=(
-                f"Hohmann Transfer ({body_key.title()}):\n"
-                f"ΔV₁ = {dv1/1000:.6f} km/s\n"
-                f"ΔV₂ = {dv2/1000:.6f} km/s\n"
-                f"Total ΔV = {(dv1+dv2)/1000:.6f} km/s"
-            )
-        )
-
-
-        # -----------------------
-        # DRAWING
-        # -----------------------
-
-        canvas.delete("all")
-
-        cx = cy = CANVAS_SIZE / 2
-
-
-        scale = compute_orbit_scale(
-            CANVAS_SIZE,
-            [
-                r1,
-                r2,
-                a_t * (1 + abs(r2-r1)/(r2+r1))
-            ]
-        )
-
-
-        # Sun = solar mode
-        # Earth = earth/moon mode
-        if body_key == "earth":
-            mode = "earth_moon"
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        if event.width < 700:
+            top.columnconfigure(0, weight=1)
+            top.columnconfigure(1, weight=0)
+            inputs.grid_configure(row=0, column=0, padx=0, pady=(0, 16), sticky="ew")
+            view.grid_configure(row=1, column=0, sticky="ew")
         else:
-            mode = "solar"
+            top.columnconfigure(0, weight=0)
+            top.columnconfigure(1, weight=1)
+            inputs.grid_configure(row=0, column=0, padx=(0, 16), pady=0, sticky="new")
+            view.grid_configure(row=0, column=1, sticky="nsew")
 
-        body_color = SOLAR_SYSTEM[body_key].get(
-            "color",
-            "#FFFFFF"
+    viewport.bind("<Configure>", resize_page)
+    ttk.Label(inputs, text="Central body").grid(row=0, column=0, sticky="w")
+    body_box = ttk.Combobox(inputs, textvariable=selected_body, state="readonly", width=18,
+                           values=tuple(key.title() for key in SOLAR_SYSTEM))
+    body_box.grid(row=1, column=0, sticky="ew", pady=(4, 16))
+
+    def altitude_field(row, title):
+        ttk.Label(inputs, text=title).grid(row=row, column=0, sticky="w")
+        field = ttk.Frame(inputs)
+        field.grid(row=row + 1, column=0, sticky="ew", pady=(4, 12))
+        field.columnconfigure(0, weight=1)
+        entry = ttk.Entry(field, width=16)
+        entry.grid(row=0, column=0, sticky="ew")
+        ttk.Label(field, text="km").grid(row=0, column=1, padx=(8, 0))
+        return entry
+
+    start_alt_entry = altitude_field(2, "Start altitude")
+    final_alt_entry = altitude_field(4, "Target altitude")
+    actions = ttk.Frame(inputs)
+    actions.grid(row=6, column=0, sticky="w", pady=(8, 0))
+    error_label = wrap_label(inputs, textvariable=error_text, style="Hohmann.Error.TLabel")
+    error_label.grid(row=7, column=0, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
+
+    canvas = tk.Canvas(view, width=1, height=340, bg="#101822", highlightthickness=0, cursor="hand2")
+    canvas.grid(row=0, column=0, sticky="ew")
+    navigation = ttk.Frame(view)
+    navigation.grid(row=1, column=0, sticky="w", pady=(8, 0))
+    wrap_label(view, text="Wheel: zoom • Drag: pan\nGrey: circular orbits • Cyan: travelled arc\nCyan marker: departure • Orange marker: arrival").grid(
+        row=2, column=0, sticky="ew", pady=(8, 0))
+
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(1, weight=1)
+    for row, (key, title) in enumerate((
+        ("total", "Total ΔV"), ("time", "Transfer time"),
+        ("departure", "Departure burn"), ("arrival", "Arrival burn"),
+    )):
+        ttk.Label(results, text=title).grid(row=row, column=0, sticky="nw", padx=(0, 16), pady=6)
+        wrap_label(results, textvariable=values[key],
+                   style="Hohmann.Value.TLabel" if row < 2 else "TLabel").grid(
+            row=row, column=1, sticky="ew", pady=6)
+    details_button = ttk.Button(results, text="Show details ▾", state="disabled")
+    details_button.grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    details = ttk.Frame(results)
+    details.columnconfigure(0, weight=1)
+    wrap_label(details, textvariable=detail_text).grid(row=0, column=0, sticky="ew")
+    details.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    details.grid_remove()
+
+    def hide_details():
+        details.grid_remove()
+        details_button.configure(text="Show details ▾")
+
+    def toggle_details():
+        if details.winfo_manager():
+            hide_details()
+        else:
+            details.grid()
+            details_button.configure(text="Hide details ▴")
+
+    details_button.configure(command=toggle_details)
+
+    def cancel_redraw():
+        if redraw_job[0] is not None:
+            canvas.after_cancel(redraw_job[0])
+            redraw_job[0] = None
+
+    def transform():
+        w, h = max(1, canvas.winfo_width()), max(1, canvas.winfo_height())
+        extent = max(current["transfer"]["r1"], current["transfer"]["r2"])
+        size = min(w, h)
+        scale = (size / 2 - min(40, size * 0.12)) / extent * camera["zoom"]
+        return w, h, scale
+
+    def render():
+        cancel_redraw()
+        canvas.delete("all")
+        transfer, body = current["transfer"], current["body"]
+        if transfer is None:
+            return
+        w, h, scale = transform()
+        cx, cy = w / 2 - camera["x"] * scale, h / 2 + camera["y"] * scale
+        radius = max(3, body["radius"] * scale)
+        canvas.create_oval(cx-radius, cy-radius, cx+radius, cy+radius,
+                           fill=body["color"], outline="", tags="body")
+        farthest = math.hypot(max(abs(cx), abs(w-cx)), max(abs(cy), abs(h-cy)))
+        for key, dash in (("r1", ()), ("r2", (5, 4))):
+            if key == "r2" and transfer["no_transfer"]:
+                continue
+            r = transfer[key] * scale
+            if r <= farthest + 2:
+                canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline="#81909d",
+                                   dash=dash, tags=key)
+        points = hohmann_transfer_arc(transfer)
+        if points:
+            pixels = [(cx + x * scale, cy - y * scale) for x, y in points]
+            canvas.create_line([v for point in pixels for v in point],
+                               fill="#66d9ef", width=3, tags="transfer_arc")
+            mid = len(pixels) // 2
+            canvas.create_line(*pixels[mid-4], *pixels[mid+4],
+                               fill="#66d9ef", width=3, arrow=tk.LAST,
+                               arrowshape=(12, 14, 5), tags="travel_arrow")
+        markers = [(transfer["r1"], "Departure", "#66d9ef")]
+        if transfer["no_transfer"]:
+            markers = [(transfer["r1"], "Shared orbit", "#66d9ef")]
+        else:
+            markers.append((-transfer["r2"], "Arrival", "#ffbf69"))
+        for x, title, color in markers:
+            px = cx + x * scale
+            canvas.create_oval(px-5, cy-5, px+5, cy+5, fill=color, outline="", tags="marker")
+            canvas.create_text(px, cy+12, text=title, fill=color, anchor="n",
+                               font=("TkDefaultFont", 10), tags="marker_label")
+
+    def fit_orbit():
+        camera.update(zoom=1.0, x=0.0, y=0.0, drag=None)
+        canvas.configure(cursor="hand2")
+        zoom_text.set("100%")
+        render()
+
+    def zoom_at(factor, x=None, y=None):
+        if current["transfer"] is None:
+            return
+        w, h, old_scale = transform()
+        x, y = w / 2 if x is None else x, h / 2 if y is None else y
+        zoom = max(0.01, min(100, camera["zoom"] * factor))
+        new_scale = old_scale * zoom / camera["zoom"]
+        camera["x"] += (x-w/2) * (1/old_scale-1/new_scale)
+        camera["y"] -= (y-h/2) * (1/old_scale-1/new_scale)
+        camera["zoom"] = zoom
+        zoom_text.set(f"{zoom*100:.0f}%")
+        render()
+
+    def wheel_zoom(event):
+        number, delta = getattr(event, "num", None), getattr(event, "delta", 0)
+        if number in (4, 5):
+            steps = 1 if number == 4 else -1
+        elif delta:
+            steps = max(-4, min(4, delta/120 if abs(delta) >= 120 else (1 if delta > 0 else -1)))
+        else:
+            return "break"
+        zoom_at(1.25 ** steps, event.x, event.y)
+        return "break"
+
+    def start_pan(event):
+        if current["transfer"] is not None:
+            camera["drag"] = (event.x, event.y)
+            canvas.configure(cursor="fleur")
+
+    def pan(event):
+        if camera["drag"] is None or current["transfer"] is None:
+            return
+        _, _, scale = transform()
+        oldx, oldy = camera["drag"]
+        camera["x"] -= (event.x-oldx) / scale
+        camera["y"] += (event.y-oldy) / scale
+        camera["drag"] = (event.x, event.y)
+        render()
+
+    def end_pan(_event=None):
+        camera["drag"] = None
+        canvas.configure(cursor="hand2")
+
+    def resize_drawing(event):
+        desired = max(260, min(440, int(event.width * 0.85)))
+        if int(canvas.cget("height")) != desired:
+            canvas.configure(height=desired)
+        cancel_redraw()
+        redraw_job[0] = canvas.after(60, render)
+
+    def clear_results():
+        for variable in values.values():
+            variable.set("—")
+        detail_text.set("")
+        hide_details()
+        details_button.state(["disabled"])
+        current.update(transfer=None, body=None)
+        end_pan()
+        fit_orbit()
+
+    def calculate(*_):
+        try:
+            start_km, target_km = float(start_alt_entry.get()), float(final_alt_entry.get())
+            body = SOLAR_SYSTEM[selected_body.get().lower()]
+            transfer = calculate_hohmann_transfer(G * body["mass"], body["radius"], start_km, target_km)
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(f"Check altitudes: {error}")
+            error_label.grid()
+            return
+        error_text.set("")
+        error_label.grid_remove()
+        current.update(transfer=transfer, body=body)
+        values["total"].set(f"{transfer['total_dv']/1000:,.3f} km/s")
+        if transfer["no_transfer"]:
+            values["time"].set("No transfer needed")
+        else:
+            seconds = round(transfer["coast"])
+            days, seconds = divmod(seconds, 86400)
+            hours, seconds = divmod(seconds, 3600)
+            minutes, seconds = divmod(seconds, 60)
+            duration = f"{hours} h {minutes:02d} min {seconds:02d} s"
+            values["time"].set((f"{days} d " if days else "") + duration)
+        for key, dv in (("departure", transfer["dv1"]), ("arrival", transfer["dv2"])):
+            values[key].set("No burn needed" if transfer["no_transfer"] else
+                            f"{abs(dv)/1000:,.3f} km/s · {transfer['direction']}")
+        detail_text.set(
+            f"Central body: {selected_body.get()}\n"
+            f"Start / target altitude: {start_km:g} / {target_km:g} km\n"
+            f"Start / target radius: {transfer['r1']/1000:,.3f} / {transfer['r2']/1000:,.3f} km\n\n"
+            f"Initial / final circular speed: {transfer['v1']/1000:.6f} / {transfer['v2']/1000:.6f} km/s\n"
+            f"Transfer speed at departure / arrival: {transfer['vt1']/1000:.6f} / {transfer['vt2']/1000:.6f} km/s\n"
+            f"Semi-major axis: {transfer['a']/1000:,.3f} km\n"
+            f"Eccentricity: {transfer['e']:.6f}\n"
+            f"Coast time: {transfer['coast']:,.3f} s\n\n"
+            "Prograde adds speed along the motion; retrograde reduces it.\n"
+            "Ideal two-body model: coplanar circular orbits and instantaneous tangential burns.\n"
+            "Transfer time is the coast between burns; launch, phasing, and burn duration are excluded."
         )
+        details_button.state(["!disabled"])
+        fit_orbit()
 
+    def reset():
+        selected_body.set("Earth")
+        for entry in (start_alt_entry, final_alt_entry):
+            entry.delete(0, tk.END)
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        start_alt_entry.focus_set()
 
-        draw_central_body(
-            canvas,
-            cx,
-            cy,
-            R,
-            scale,
-            body_color
-        )
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    ttk.Button(navigation, text="−", width=3, command=lambda: zoom_at(1/1.25)).pack(side=tk.LEFT)
+    ttk.Button(navigation, text="+", width=3, command=lambda: zoom_at(1.25)).pack(side=tk.LEFT, padx=4)
+    ttk.Button(navigation, text="Fit orbit", command=fit_orbit).pack(side=tk.LEFT)
+    ttk.Label(navigation, textvariable=zoom_text).pack(side=tk.LEFT, padx=8)
+    for entry in (start_alt_entry, final_alt_entry):
+        entry.bind("<Return>", calculate)
 
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
 
-        draw_reference_orbits(
-            canvas,
-            mode,
-            scale,
-            cx,
-            cy
-        )
+    def bind_scrolling(widget):
+        if widget is canvas:
+            return  # The wheel over the drawing belongs to zoom, not page scrolling.
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
 
-
-        # starting circular orbit
-        draw_kepler_orbit(
-            canvas,
-            r1,
-            0,
-            scale,
-            cx,
-            cy
-        )
-
-
-        # transfer ellipse
-        e_t = abs(r2-r1)/(r2+r1)
-
-        draw_kepler_orbit(
-            canvas,
-            a_t,
-            e_t,
-            scale,
-            cx,
-            cy
-        )
-
-
-        # final circular orbit
-        draw_kepler_orbit(
-            canvas,
-            r2,
-            0,
-            scale,
-            cx,
-            cy
-        )
-
-
-    tk.Button(
-        frame,
-        text="Calculate ΔV",
-        command=calculate
-    ).pack(pady=8)
-
-
-    start_alt_entry.focus()
+    bind_scrolling(viewport)
+    for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        canvas.bind(event_name, wheel_zoom)
+    canvas.bind("<ButtonPress-1>", start_pan)
+    canvas.bind("<B1-Motion>", pan)
+    canvas.bind("<ButtonRelease-1>", end_pan)
+    canvas.bind("<Configure>", resize_drawing)
+    canvas.bind("<Destroy>", lambda _event: cancel_redraw())
+    start_alt_entry.focus_set()
 
 
 # OV_UI2 breaks if orbit is hyperbolic (numbers are correct the orbit drawing tool doenst work
@@ -1417,43 +1564,42 @@ def calculate_orbit_from_periapsis_velocity(mu, body_radius, periapsis_km, veloc
     }
 
 
-def draw_orbit_trajectory(canvas, orbit, scale, cx, cy):
+def draw_orbit_trajectory(canvas, orbit, scale, cx, cy, view_radius=None):
     """Draw a conic safely, including bounded views of escape trajectories."""
     eccentricity = orbit["e"]
     semi_latus_rectum = orbit["p"]
-    max_radius = orbit["display_radius"]
-
-    if orbit["type"] == "Elliptic":
-        theta_min, theta_max = 0.0, 2 * math.pi
-    else:
-        cosine_limit = (semi_latus_rectum / max_radius - 1) / eccentricity
-        cosine_limit = max(-1.0, min(1.0, cosine_limit))
-        theta_max = math.acos(cosine_limit)
-        theta_min = -theta_max
-
+    max_radius = max(orbit["r_p"], view_radius or orbit["display_radius"])
     points = []
-    steps = 600
+    steps = 800
+    # Anomaly-based sampling remains smooth along escape trajectories when zoomed out.
+    if orbit["type"] == "Parabolic":
+        limit = math.sqrt(max(0, max_radius / orbit["r_p"] - 1))
+    elif orbit["type"] == "Hyperbolic":
+        axis = abs(orbit["a"])
+        limit = math.acosh(max(1, (max_radius / axis + 1) / eccentricity))
+
     for index in range(steps + 1):
-        theta = theta_min + (theta_max - theta_min) * index / steps
-        denominator = 1 + eccentricity * math.cos(theta)
-        if denominator <= 0:
-            continue
-
-        radius = semi_latus_rectum / denominator
-        if radius <= 0 or radius > max_radius * 1.001:
-            continue
-
-        points.extend((
-            cx + radius * math.cos(theta) * scale,
-            cy - radius * math.sin(theta) * scale,
-        ))
+        fraction = index / steps
+        if orbit["type"] == "Elliptic":
+            anomaly = 2 * math.pi * fraction
+            x = orbit["a"] * (math.cos(anomaly) - eccentricity)
+            y = math.sqrt(orbit["a"] * semi_latus_rectum) * math.sin(anomaly)
+        elif orbit["type"] == "Parabolic":
+            anomaly = (2 * fraction - 1) * limit
+            x = orbit["r_p"] * (1 - anomaly * anomaly)
+            y = 2 * orbit["r_p"] * anomaly
+        else:
+            anomaly = (2 * fraction - 1) * limit
+            x = axis * (eccentricity - math.cosh(anomaly))
+            y = math.sqrt(axis * semi_latus_rectum) * math.sinh(anomaly)
+        points.extend((cx + x * scale, cy - y * scale))
 
     if len(points) > 4:
         canvas.create_line(
             points,
             fill="white",
             width=2,
-            smooth=True,
+            smooth=False,
             dash=(6, 4) if orbit["type"] != "Elliptic" else None,
         )
 
@@ -1527,10 +1673,11 @@ def orbit_visualizer_UI3(root):
     input_mode = tk.StringVar(value="apsides")
     show_reference = tk.BooleanVar(value=True)
     result_summary = tk.StringVar(value="Enter orbit parameters, then calculate the trajectory.")
-    result_details = tk.StringVar(value="")
     details_visible = tk.BooleanVar(value=False)
     current = {"orbit": None, "body": None}
     resize_job = [None]
+    camera = {"zoom": 1.0, "x": 0.0, "y": 0.0, "drag": None}
+    zoom_text = tk.StringVar(master=root, value="100%")
 
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
@@ -1555,59 +1702,97 @@ def orbit_visualizer_UI3(root):
     )
     body_box.grid(row=1, column=0, sticky="ew", pady=(4, 16))
 
-    ttk.Label(setup, text="Input mode:").grid(row=2, column=0, sticky="w")
+    ttk.Label(setup, text="Input mode:").grid(row=3, column=0, sticky="w")
     ttk.Radiobutton(
         setup,
         text="Apoapsis / periapsis",
         variable=input_mode,
         value="apsides",
-    ).grid(row=3, column=0, sticky="w", pady=(4, 2))
+    ).grid(row=4, column=0, sticky="w", pady=(4, 2))
     ttk.Radiobutton(
         setup,
         text="Velocity at periapsis",
         variable=input_mode,
         value="velocity",
-    ).grid(row=4, column=0, sticky="w", pady=(0, 16))
+    ).grid(row=5, column=0, sticky="w", pady=(0, 16))
 
-    ttk.Label(setup, text="Periapsis altitude [km]:").grid(row=5, column=0, sticky="w")
+    ttk.Label(setup, text="Periapsis altitude [km]:").grid(row=6, column=0, sticky="w")
     peri_entry = ttk.Entry(setup, width=22)
-    peri_entry.grid(row=6, column=0, sticky="ew", pady=(4, 12))
+    peri_entry.grid(row=7, column=0, sticky="ew", pady=(4, 12))
 
-    ttk.Label(setup, text="Apoapsis altitude [km]:").grid(row=7, column=0, sticky="w")
+    apo_label = ttk.Label(setup, text="Apoapsis altitude [km]:")
+    apo_label.grid(row=8, column=0, sticky="w")
     apo_entry = ttk.Entry(setup, width=22)
-    apo_entry.grid(row=8, column=0, sticky="ew", pady=(4, 12))
+    apo_entry.grid(row=9, column=0, sticky="ew", pady=(4, 12))
 
-    ttk.Label(setup, text="Velocity at periapsis [km/s]:").grid(row=9, column=0, sticky="w")
+    velocity_label = ttk.Label(setup, text="Velocity at periapsis [km/s]:")
+    velocity_label.grid(row=8, column=0, sticky="w")
     velocity_entry = ttk.Entry(setup, width=22)
-    velocity_entry.grid(row=10, column=0, sticky="ew", pady=(4, 16))
+    velocity_entry.grid(row=9, column=0, sticky="ew", pady=(4, 12))
 
-    canvas = tk.Canvas(view, width=360, height=360, bg="black", highlightthickness=0)
+    canvas = tk.Canvas(view, width=360, height=360, bg="black", highlightthickness=0, cursor="hand2")
     canvas.grid(row=0, column=0, sticky="nsew")
     view.columnconfigure(0, weight=1)
     view.rowconfigure(0, weight=1)
+    navigation = ttk.Frame(view)
+    navigation.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    ttk.Button(navigation, text="−", width=3, command=lambda: zoom_at(1 / 1.25)).pack(side=tk.LEFT)
+    ttk.Button(navigation, text="+", width=3, command=lambda: zoom_at(1.25)).pack(side=tk.LEFT, padx=4)
+    ttk.Button(navigation, text="Fit orbit", command=lambda: fit_orbit()).pack(side=tk.LEFT)
+    ttk.Label(navigation, textvariable=zoom_text).pack(side=tk.LEFT, padx=8)
     ttk.Checkbutton(
         view,
         text="Show reference orbits",
         variable=show_reference,
         command=lambda: render_orbit(),
-    ).grid(row=1, column=0, sticky="w", pady=(10, 0))
-    ttk.Label(
+    ).grid(row=2, column=0, sticky="w", pady=(10, 0))
+    legend_label = ttk.Label(
         view,
-        text="White: selected orbit   •   Grey: reference orbits",
-    ).grid(row=2, column=0, sticky="w", pady=(4, 0))
+        text="Wheel: zoom • Drag: pan\nWhite: orbit • Grey: references",
+        width=1, wraplength=1, justify=tk.LEFT,
+    )
+    legend_label.grid(row=3, column=0, sticky="ew", pady=(4, 0))
 
     result_card = ttk.LabelFrame(view, text="Results", padding=10)
-    result_card.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+    result_card.grid(row=4, column=0, sticky="ew", pady=(12, 0))
     result_card.columnconfigure(0, weight=1)
-    ttk.Label(result_card, textvariable=result_summary, justify=tk.LEFT, wraplength=520).grid(
-        row=0, column=0, sticky="w"
+    summary_label = ttk.Label(
+        result_card, textvariable=result_summary, justify=tk.LEFT,
+        width=1, wraplength=1,
     )
+    summary_label.grid(row=0, column=0, sticky="ew")
+
+    def fit_text_to_width(event):
+        # Use the allocated label width, including when the tab is narrowed.
+        wraplength = max(1, event.width - 4)
+        if int(event.widget.cget("wraplength")) != wraplength:
+            event.widget.configure(wraplength=wraplength)
+
+    legend_label.bind("<Configure>", fit_text_to_width)
+    summary_label.bind("<Configure>", fit_text_to_width)
     details_button = ttk.Button(result_card, text="Show detailed results")
     details_button.grid(row=1, column=0, sticky="w", pady=(8, 0))
     details_frame = ttk.Frame(result_card)
-    ttk.Label(details_frame, textvariable=result_details, justify=tk.LEFT).grid(sticky="w")
+    details_frame.columnconfigure(0, weight=1)
+    details_text = tk.Text(
+        details_frame, height=4, width=1, wrap="word",
+        font="TkDefaultFont", state="disabled", padx=6, pady=4,
+    )
+    details_text.grid(row=0, column=0, sticky="ew")
+    details_scrollbar = ttk.Scrollbar(
+        details_frame, orient="vertical", command=details_text.yview,
+    )
+    details_scrollbar.grid(row=0, column=1, sticky="ns")
+    details_text.configure(yscrollcommand=details_scrollbar.set)
     details_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
     details_frame.grid_remove()
+
+    def set_details(text):
+        details_text.configure(state="normal")
+        details_text.delete("1.0", tk.END)
+        details_text.insert("1.0", text)
+        details_text.yview_moveto(0)
+        details_text.configure(state="disabled")
 
     def toggle_details():
         if details_visible.get():
@@ -1622,38 +1807,113 @@ def orbit_visualizer_UI3(root):
     details_button.config(command=toggle_details)
 
     def update_mode(*_):
-        if input_mode.get() == "apsides":
-            apo_entry.state(["!disabled"])
-            velocity_entry.state(["disabled"])
-        else:
-            apo_entry.state(["disabled"])
-            velocity_entry.state(["!disabled"])
+        apsides = input_mode.get() == "apsides"
+        for widget in (apo_label, apo_entry):
+            if apsides:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        for widget in (velocity_label, velocity_entry):
+            if apsides:
+                widget.grid_remove()
+            else:
+                widget.grid()
+
+    def view_transform():
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        canvas_size = min(width, height)
+        padding = min(35, canvas_size * 0.1)
+        scale = (canvas_size / 2 - padding) / current["orbit"]["display_radius"]
+        scale *= camera["zoom"]
+        return width, height, scale
+
+    def cancel_redraw():
+        if resize_job[0] is not None:
+            canvas.after_cancel(resize_job[0])
+            resize_job[0] = None
 
     def render_orbit():
-        resize_job[0] = None
+        cancel_redraw()
         orbit = current["orbit"]
         body = current["body"]
         if orbit is None or body is None:
             return
 
-        width = max(canvas.winfo_width(), 1)
-        height = max(canvas.winfo_height(), 1)
-        canvas_size = min(width, height)
-        center_x = width / 2
-        center_y = height / 2
-        scale = compute_orbit_scale(canvas_size, [orbit["display_radius"]], padding=35)
+        width, height, scale = view_transform()
+        center_x = width / 2 - camera["x"] * scale
+        center_y = height / 2 + camera["y"] * scale
+        visible_radius = 1.1 * math.hypot(
+            max(abs(center_x), abs(width - center_x)),
+            max(abs(center_y), abs(height - center_y)),
+        ) / scale
 
         canvas.delete("all")
-        draw_central_body(canvas, center_x, center_y, body["radius"], scale, body["color"])
+        draw_central_body(
+            canvas, center_x, center_y, body["radius"], scale, body["color"],
+            min_px=3, max_px=max(3, body["radius"] * scale),
+        )
         if show_reference.get():
-            draw_reference_orbits(canvas, body["reference_mode"], scale, center_x, center_y)
-        draw_orbit_trajectory(canvas, orbit, scale, center_x, center_y)
+            draw_reference_orbits(
+                canvas, body["reference_mode"], scale, center_x, center_y, clip_to_view=True,
+            )
+        draw_orbit_trajectory(canvas, orbit, scale, center_x, center_y, view_radius=visible_radius)
+
+    def fit_orbit():
+        camera.update(zoom=1.0, x=0.0, y=0.0, drag=None)
+        zoom_text.set("100%")
+        render_orbit()
+
+    def zoom_at(factor, x=None, y=None):
+        if current["orbit"] is None:
+            return
+        width, height, old_scale = view_transform()
+        x = width / 2 if x is None else x
+        y = height / 2 if y is None else y
+        new_zoom = max(0.01, min(100.0, camera["zoom"] * factor))
+        new_scale = old_scale * new_zoom / camera["zoom"]
+        # Preserve the physical point beneath the cursor while changing scale.
+        camera["x"] += (x - width / 2) * (1 / old_scale - 1 / new_scale)
+        camera["y"] -= (y - height / 2) * (1 / old_scale - 1 / new_scale)
+        camera["zoom"] = new_zoom
+        zoom_text.set(f"{new_zoom * 100:.0f}%")
+        render_orbit()
+
+    def wheel_zoom(event):
+        number = getattr(event, "num", None)
+        delta = getattr(event, "delta", 0)
+        if number in (4, 5):
+            steps = 1 if number == 4 else -1
+        elif delta:
+            steps = max(-4, min(4, delta / 120 if abs(delta) >= 120 else (1 if delta > 0 else -1)))
+        else:
+            return "break"
+        zoom_at(1.25 ** steps, event.x, event.y)
+        return "break"
+
+    def start_pan(event):
+        if current["orbit"] is not None:
+            camera["drag"] = (event.x, event.y)
+            canvas.configure(cursor="fleur")
+
+    def pan(event):
+        if camera["drag"] is None or current["orbit"] is None:
+            return
+        _, _, scale = view_transform()
+        previous_x, previous_y = camera["drag"]
+        camera["x"] -= (event.x - previous_x) / scale
+        camera["y"] += (event.y - previous_y) / scale
+        camera["drag"] = (event.x, event.y)
+        render_orbit()
+
+    def end_pan(_event=None):
+        camera["drag"] = None
+        canvas.configure(cursor="hand2")
 
     def queue_resize_redraw(_event):
         if current["orbit"] is None:
             return
-        if resize_job[0] is not None:
-            canvas.after_cancel(resize_job[0])
+        cancel_redraw()
         resize_job[0] = canvas.after(60, render_orbit)
 
     def draw_orbit():
@@ -1670,38 +1930,50 @@ def orbit_visualizer_UI3(root):
                 )
         except ValueError as error:
             result_summary.set(f"Error: {error}")
-            result_details.set("")
+            set_details("")
             return
 
         current["orbit"] = orbit
         current["body"] = body
         result_summary.set(format_orbit_summary(orbit))
-        result_details.set(format_orbit_results(orbit))
-        render_orbit()
+        set_details(format_orbit_results(orbit))
+        fit_orbit()
 
     def reset():
+        cancel_redraw()
+        end_pan()
+        camera.update(zoom=1.0, x=0.0, y=0.0)
+        zoom_text.set("100%")
         selected_body.set("Earth")
         input_mode.set("apsides")
         show_reference.set(True)
         for entry in (peri_entry, apo_entry, velocity_entry):
+            entry.state(["!disabled"])
             entry.delete(0, tk.END)
         canvas.delete("all")
         current["orbit"] = None
         current["body"] = None
         result_summary.set("Enter orbit parameters, then calculate the trajectory.")
-        result_details.set("")
+        set_details("")
         if details_visible.get():
             toggle_details()
         update_mode()
         peri_entry.focus()
 
     button_row = ttk.Frame(setup)
-    button_row.grid(row=11, column=0, sticky="ew")
+    button_row.grid(row=2, column=0, sticky="ew", pady=(0, 12))
     ttk.Button(button_row, text="Calculate & Draw Orbit", command=draw_orbit).pack(side=tk.LEFT)
     ttk.Button(button_row, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
 
     input_mode.trace_add("write", update_mode)
     canvas.bind("<Configure>", queue_resize_redraw)
+    canvas.bind("<MouseWheel>", wheel_zoom)
+    canvas.bind("<Button-4>", wheel_zoom)
+    canvas.bind("<Button-5>", wheel_zoom)
+    canvas.bind("<ButtonPress-1>", start_pan)
+    canvas.bind("<B1-Motion>", pan)
+    canvas.bind("<ButtonRelease-1>", end_pan)
+    canvas.bind("<Destroy>", lambda _event: cancel_redraw())
     for entry in (peri_entry, apo_entry, velocity_entry):
         entry.bind("<Return>", lambda _event: draw_orbit())
     update_mode()
@@ -1709,59 +1981,193 @@ def orbit_visualizer_UI3(root):
 
 
 
-def parallaxe_distance_UI2(root):
-
-    # Clear non-menu widgets
+def _single_input_calculator_UI(root, description, input_label, unit, result_labels, evaluator, hint,
+                                result_visual=None):
+    """Shared scrollable card layout for simple one-input calculators."""
     for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu"]:
-            widget.destroy()
+        widget.destroy()
 
+    style = ttk.Style(root)
+    style.configure("SimpleCalc.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("SimpleCalc.Error.TLabel", foreground="#a12622")
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(
+        shell, width=1, height=1, highlightthickness=0,
+        background=style.lookup("TFrame", "background") or "#eeeeee",
+    )
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
 
-    # Clear again except menus + buttons
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
 
-    def calculate(*args):
-        try:
-            ro = float(roi.get())
-        except ValueError:
-            result_label.config(text="Error: Invalid input, please enter a number.")
-            return
+    def update_scroll_region(_event=None):
+        viewport.configure(scrollregion=viewport.bbox("all"))
 
-        if ro <= 0:
-            result_label.config(text="Error: Parallax must be greater than 0 arcseconds.")
-            return
+    viewport.bind("<Configure>", resize_page)
+    page.bind("<Configure>", update_scroll_region)
 
-        # parallax formula
-        r = AU / ((pi / 180) * (ro / 3600))
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
 
-        result_label.config(
-            text=f"Estimated Distance\n"
-                 f"----------------------\n"
-                 f"[Ly]:   {r / ly:.3f}\n"
-                 f"[Pc]:   {r / psc:.3f}\n"
-                 f"[Mpc]:  {r / (psc * 1e6):.3f}\n"
+        def fit_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+
+        label.bind("<Configure>", fit_text)
+        return label
+
+    wrapping_label(page, text=description).grid(row=0, column=0, sticky="ew", pady=(0, 16))
+    inputs = ttk.LabelFrame(page, text="Inputs", padding=16)
+    inputs.grid(row=1, column=0, sticky="ew")
+    inputs.columnconfigure(1, weight=1)
+    ttk.Label(inputs, text=input_label).grid(row=0, column=0, sticky="w", padx=(0, 16))
+    entry = ttk.Entry(inputs, width=16)
+    entry.grid(row=0, column=1, sticky="ew")
+    ttk.Label(inputs, text=unit).grid(row=0, column=2, sticky="w", padx=(8, 0))
+    wrapping_label(inputs, text=hint).grid(
+        row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0),
+    )
+    actions = ttk.Frame(inputs)
+    actions.grid(row=2, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(inputs, textvariable=error_text, style="SimpleCalc.Error.TLabel")
+    error_label.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
+
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(1, weight=1)
+    result_values = [tk.StringVar(master=root, value="—") for _ in result_labels]
+    for row, (label, variable) in enumerate(zip(result_labels, result_values)):
+        ttk.Label(results, text=label).grid(row=row, column=0, sticky="nw", padx=(0, 16), pady=6)
+        wrapping_label(results, textvariable=variable, style="SimpleCalc.Value.TLabel").grid(
+            row=row, column=1, sticky="ew", pady=6,
         )
 
-    frame = tk.Frame(root, width=1000, height=600)
-    frame.pack()
+    details_row = len(result_labels)
+    update_visual = None
+    if result_visual is not None:
+        visual_frame = ttk.Frame(results)
+        visual_frame.grid(row=details_row, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        update_visual = result_visual(visual_frame)
+        update_visual(None)
+        details_row += 1
 
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
+    details_text = tk.StringVar(master=root)
+    details = ttk.Frame(results)
+    details.columnconfigure(0, weight=1)
+    wrapping_label(details, textvariable=details_text).grid(row=0, column=0, sticky="ew")
+    details.grid(row=details_row+1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    details.grid_remove()
 
-    par_label = tk.Label(input_frame, text="Enter Parallax in [arc sec]")
-    par_label.pack(side=tk.LEFT)
+    def hide_details():
+        details.grid_remove()
+        details_button.configure(text="Show details ▾")
 
-    roi = tk.Entry(input_frame)
-    roi.pack(side=tk.LEFT)
-    roi.bind("<Return>", calculate)
+    def toggle_details():
+        if details.winfo_manager():
+            hide_details()
+        else:
+            details.grid()
+            details_button.configure(text="Hide details ▴")
 
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
-    calculate_button.pack(side=tk.LEFT, padx=10)
+    details_button = ttk.Button(results, text="Show details ▾", command=toggle_details, state="disabled")
+    details_button.grid(row=details_row, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
+    def clear_results():
+        for variable in result_values:
+            variable.set("—")
+        if update_visual is not None:
+            update_visual(None)
+        details_text.set("")
+        hide_details()
+        details_button.state(["disabled"])
+
+    def calculate(*_):
+        try:
+            try:
+                value = float(entry.get())
+            except ValueError:
+                raise ValueError(f"{input_label}: enter a number.") from None
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{input_label}: enter a finite number greater than zero.")
+            answers, explanation = evaluator(value)
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(str(error))
+            error_label.grid()
+            return
+        error_text.set("")
+        error_label.grid_remove()
+        for variable, answer in zip(result_values, answers):
+            variable.set(answer)
+        if update_visual is not None:
+            update_visual(answers)
+        details_text.set(explanation)
+        details_button.state(["!disabled"])
+
+    def reset():
+        entry.delete(0, tk.END)
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        entry.focus_set()
+
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    entry.bind("<Return>", calculate)
+
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
+
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
+
+    bind_scrolling(viewport)
+    entry.focus_set()
+
+
+def parallaxe_distance_UI2(root):
+    def evaluate(parallax_arcsec):
+        # Preserve the existing small-angle calculation and distance constants.
+        distance_m = AU / ((pi / 180) * (parallax_arcsec / 3600))
+        distance_pc, distance_ly = distance_m / psc, distance_m / ly
+        if not all(math.isfinite(v) and v > 0 for v in (distance_m, distance_pc, distance_ly)):
+            raise ValueError("Parallax is outside the supported numeric range.")
+        answers = (f"{distance_pc:.6g} pc", f"{distance_ly:.6g} ly")
+        details = (
+            f"Parallax: {parallax_arcsec:.6g} arcseconds\n"
+            f"Distance: {distance_m:.6e} m\n"
+            f"Distance: {distance_pc / 1000:.6g} kpc\n"
+            f"Distance: {distance_pc / 1e6:.6g} Mpc\n\n"
+            "Model: distance = 1 AU / parallax angle in radians (small-angle approximation).\n"
+            "Equivalent relation: distance in parsecs ≈ 1 / parallax in arcseconds.\n"
+            "This estimate does not account for measurement uncertainty."
+        )
+        return answers, details
+
+    _single_input_calculator_UI(
+        root, "Estimate a star's distance from its annual parallax.",
+        "Parallax", "arcsec", ("Distance", "In light-years"), evaluate,
+        "Example: 0.1 arcsec. Enter a positive parallax angle.",
+    )
 
 
 
@@ -1796,51 +2202,34 @@ def spectrum_name(wavelength):
 
 
 def photon_energy_spectrum_UI(root):
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+    def evaluate(wavelength):
+        energy_j, energy_ev = photon_energy(wavelength)
+        frequency = c / wavelength
+        if not all(math.isfinite(v) and v > 0 for v in (energy_j, energy_ev, frequency)):
+            raise ValueError("Wavelength is outside the supported numeric range.")
+        answers = (
+            f"{energy_ev:.6g} eV",
+            f"{energy_j:.6e} J",
+            spectrum_name(wavelength),
+        )
+        details = (
+            f"Wavelength: {wavelength:.6g} m\n"
+            f"Frequency: {frequency:.6e} Hz\n\n"
+            f"Energy: {energy_ev / 1e-9:.6g} neV\n"
+            f"Energy: {energy_ev / 1e3:.6g} keV\n"
+            f"Energy: {energy_ev / 1e6:.6g} MeV\n"
+            f"Energy: {energy_ev / 1e9:.6g} GeV\n"
+            f"Energy: {energy_ev / 1e12:.6g} TeV\n\n"
+            "Model: frequency = c / wavelength; energy per photon = h × frequency.\n"
+            "Wavelength and frequency are related using the speed of light in vacuum."
+        )
+        return answers, details
 
-    def calculate(*args):
-        wavelengthi = wavelength_entry.get()
-        try:
-            wavelength = float(wavelengthi)
-            if wavelength <= 0:
-                raise ValueError
-        except ValueError:
-            result_label.config(text="Invalid input. Please enter a valid number.")
-            return
-
-        energy_J, energy_eV = photon_energy(wavelength)
-        spectrumname = spectrum_name(wavelength)
-
-        result_label.config(text=f"{spectrumname}\n"
-                                  f"------------------\n"
-                                  f"{round(energy_J)} Joules\n"
-                                  f"{round(energy_eV/1e-9, 9)} neV\n"
-                                  f"{round(energy_eV, 9)} eV\n"
-                                  f"{round(energy_eV/1e6, 5)} MeV\n"
-                                  f"{round(energy_eV/1e9, 5)} GeV\n"
-                                  f"{round(energy_eV/1e12, 5)} TeV")
-
-    # Create the UI elements
-    frame = tk.Frame(root, width=1000, height=600)
-    frame.pack()
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
-
-    wavelength_label = tk.Label(input_frame, text="Wavelength in [m]: ")
-    wavelength_label.pack(side=tk.LEFT)
-
-    wavelength_entry = tk.Entry(input_frame)
-    wavelength_entry.pack(side=tk.LEFT)
-    wavelength_entry.bind("<Return>", calculate)
-
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
-    calculate_button.pack(side=tk.LEFT, padx=10)
-
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
+    _single_input_calculator_UI(
+        root, "Calculate the energy of a photon from its wavelength.",
+        "Wavelength", "m", ("Photon energy", "In joules", "Spectrum"), evaluate,
+        "Example: 5e-7 m = 500 nm. Scientific notation is supported.",
+    )
 
 
 MS_colors = ['blue', 'blue', 'cyan', 'green', 'yellow', 'orange', 'red']
@@ -1852,81 +2241,98 @@ MS_sptype = ['O', 'B', 'A', 'F', 'G', 'K', 'M']
 
 
 def spectral_class3_UI(root):
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
-    def calculate(*args):
-        try:
-            temp = float(temperature_entry.get())
-        except ValueError:
-            result_label.config(text="Error: Invalid input, please enter a number.")
-            return
+    """Temperature-based stellar estimate with a highlighted spectral-class strip."""
+    # Preserve the calculator's existing O–M thresholds and colour labels.
+    classes = (
+        ("O", 30000, "Blue", "#9bbcff", "T ≥ 30,000 K"),
+        ("B", 10000, "Blue-White", "#c4d9ff", "10,000 ≤ T < 30,000 K"),
+        ("A", 7500, "White", "#edf2ff", "7,500 ≤ T < 10,000 K"),
+        ("F", 6000, "Yellow-White", "#fff8dc", "6,000 ≤ T < 7,500 K"),
+        ("G", 5200, "Yellow", "#ffe58a", "5,200 ≤ T < 6,000 K"),
+        ("K", 3700, "Orange", "#ffb570", "3,700 ≤ T < 5,200 K"),
+        ("M", 0, "Red", "#ef8c82", "0 < T < 3,700 K"),
+    )
 
-        if temp <= 0:
-            result_label.config(text="Error: Temperature must be greater than 0 K.")
-            return
+    def evaluate(temperature):
+        spectral_class, _, colour, _, temperature_range = next(
+            row for row in classes if temperature >= row[1]
+        )
+        wavelength_nm = 2.898e6 / temperature
+        if not math.isfinite(wavelength_nm) or wavelength_nm <= 0:
+            raise ValueError("Temperature is outside the supported numeric range.")
 
-        if temp >= 30000:
-            spectral_class = "O"
-            color = "Blue"
-        elif temp >= 10000:
-            spectral_class = "B"
-            color = "Blue-White"
-        elif temp >= 7500:
-            spectral_class = "A"
-            color = "White"
-        elif temp >= 6000:
-            spectral_class = "F"
-            color = "Yellow-White"
-        elif temp >= 5200:
-            spectral_class = "G"
-            color = "Yellow"
-        elif temp >= 3700:
-            spectral_class = "K"
-            color = "Orange"
+        # Keep the existing peak-region classification for this UI update.
+        if wavelength_nm < 0.01:
+            region = "Gamma rays"
+        elif wavelength_nm < 10:
+            region = "X-rays"
+        elif wavelength_nm < 400:
+            region = "Ultraviolet"
+        elif wavelength_nm < 700:
+            region = "Visible light"
+        elif wavelength_nm < 3000:
+            region = "Infrared"
+        elif wavelength_nm < 1000000:
+            region = "Microwaves"
         else:
-            spectral_class = "M"
-            color = "Red"
+            region = "Radio waves"
 
-        # calculate peak wavelength and determine part of spectrum
-        wavelength = (2.898 * 10 ** 6) / temp
-        if wavelength < 0.01:
-            spectrum_part = "Gamma rays"
-        elif wavelength < 10:
-            spectrum_part = "X-rays"
-        elif wavelength < 400:
-            spectrum_part = "Ultraviolet"
-        elif wavelength < 700:
-            spectrum_part = "Visible light"
-        elif wavelength < 3000:
-            spectrum_part = "Infrared"
-        elif wavelength < 1000000:
-            spectrum_part = "Microwaves"
-        else:
-            spectrum_part = "Radio waves"
+        answers = (spectral_class, f"{wavelength_nm:.6g} nm", region)
+        details = (
+            f"Surface temperature: {temperature:,.6g} K\n"
+            f"Estimated class: {spectral_class}\n"
+            f"Temperature range in this model: {temperature_range}\n"
+            f"Approximate colour label: {colour}\n\n"
+            "Wien's displacement law (wavelength form):\n"
+            "λ_peak = 2.898 × 10⁶ nm·K / T\n"
+            f"λ_peak = 2.898 × 10⁶ / {temperature:.6g} = {wavelength_nm:.6g} nm\n\n"
+            "The peak uses a blackbody approximation.\n"
+            "The O–B–A–F–G–K–M classes here are temperature estimates; "
+            "spectral features are needed for a full classification.\n"
+            "The strip shows approximate class colours, not the colour of the peak wavelength."
+        )
+        return answers, details
 
-        result_label.config(text=f"Spectral Class: {spectral_class} ({color})\n"
-                                  f"Peak Wavelength: {wavelength:.3g} nm\n"
-                                  f"Part of Spectrum: {spectrum_part}")
+    def build_class_strip(parent):
+        parent.columnconfigure(0, weight=1)
+        strip = ttk.Frame(parent)
+        strip.grid(row=0, column=0, sticky="ew")
+        tiles = {}
+        markers = {}
+        for column, (name, _, _, colour, _) in enumerate(classes):
+            strip.columnconfigure(column, weight=1, uniform="stellar_classes")
+            tile = tk.Label(
+                strip, text=name, width=2, padx=4, pady=10,
+                background=colour, foreground="#172b40",
+                font=("TkDefaultFont", 14, "bold"),
+                relief="flat", borderwidth=0, highlightthickness=3,
+                highlightbackground="#b8bdc4",
+            )
+            tile.grid(row=0, column=column, sticky="ew", padx=2)
+            marker = ttk.Label(strip, text=" ", anchor="center")
+            marker.grid(row=1, column=column, sticky="ew")
+            tiles[name], markers[name] = tile, marker
 
-    # create the UI elements
-    frame = tk.Frame(root, width=500, height=500)
-    frame.pack()
+        captions = ttk.Frame(parent)
+        captions.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        ttk.Label(captions, text="← Hotter").pack(side=tk.LEFT)
+        ttk.Label(captions, text="Cooler →").pack(side=tk.RIGHT)
 
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
+        def update(answers):
+            selected = answers[0] if answers is not None else None
+            for name, tile in tiles.items():
+                tile.configure(highlightbackground="#172b40" if name == selected else "#b8bdc4")
+                markers[name].configure(text="▲" if name == selected else " ")
 
-    temperature_label = tk.Label(input_frame, text="Temperature in [K]: ",font=("Arial", 22))
-    temperature_label.pack(side=tk.LEFT)
+        return update
 
-    temperature_entry = tk.Entry(input_frame)
-    temperature_entry.pack(side=tk.LEFT)
-    temperature_entry.bind("<Return>", calculate)
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate,font=("Arial", 22))
-    calculate_button.pack(side=tk.LEFT, padx=10)
-
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
+    _single_input_calculator_UI(
+        root, "Estimate a star's spectral class and peak wavelength from its surface temperature.",
+        "Surface temperature", "K",
+        ("Estimated class", "Peak wavelength", "Peak spectrum region"), evaluate,
+        "Example: 5800 K. Enter a positive surface temperature.",
+        result_visual=build_class_strip,
+    )
 
 
 
@@ -2423,71 +2829,208 @@ def stellar_magnitude_UI2(root):
 
 
 def roche_limit_UI(root):
-    # Clear existing widgets except menu/buttons
+    """Build the Roche Limit tool inside its calculator tab."""
     for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+        widget.destroy()
 
-    def calculate(*args):
+    style = ttk.Style(root)
+    style.configure("Roche.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("Roche.Error.TLabel", foreground="#a12622")
+
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(
+        shell, width=1, height=1, highlightthickness=0,
+        background=style.lookup("TFrame", "background") or "#eeeeee",
+    )
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+
+    def update_scroll_region(_event=None):
+        viewport.configure(scrollregion=viewport.bbox("all"))
+
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+
+    viewport.bind("<Configure>", resize_page)
+    page.bind("<Configure>", update_scroll_region)
+
+    def wrapping_label(parent, **kwargs):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **kwargs)
+
+        def resize_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+
+        label.bind("<Configure>", resize_text)
+        return label
+
+    wrapping_label(
+        page, text="Estimate the distance at which tidal forces can disrupt a secondary body.",
+    ).grid(row=0, column=0, sticky="ew", pady=(0, 16))
+
+    inputs = ttk.LabelFrame(page, text="Inputs", padding=16)
+    inputs.grid(row=1, column=0, sticky="ew")
+    inputs.columnconfigure(1, weight=1)
+
+    def make_input(row, label, unit):
+        ttk.Label(inputs, text=label).grid(
+            row=row, column=0, sticky="w", padx=(0, 16), pady=6,
+        )
+        entry = ttk.Entry(inputs, width=14)
+        entry.grid(row=row, column=1, sticky="ew", pady=6)
+        ttk.Label(inputs, text=unit).grid(
+            row=row, column=2, sticky="w", padx=(8, 0), pady=6,
+        )
+        return entry
+
+    radius_entry = make_input(0, "Primary radius", "km")
+    rho_primary_entry = make_input(1, "Primary density", "g/cm³")
+    rho_secondary_entry = make_input(2, "Secondary density", "g/cm³")
+
+    actions = ttk.Frame(inputs)
+    actions.grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(
+        inputs, textvariable=error_text, style="Roche.Error.TLabel",
+    )
+    error_label.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
+
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(1, weight=1)
+    fluid_text = tk.StringVar(master=root, value="—")
+    rigid_text = tk.StringVar(master=root, value="—")
+    for row, (label, variable) in enumerate((
+        ("Fluid limit", fluid_text), ("Rigid limit", rigid_text),
+    )):
+        ttk.Label(results, text=label).grid(
+            row=row, column=0, sticky="w", padx=(0, 16), pady=6,
+        )
+        wrapping_label(
+            results, textvariable=variable, style="Roche.Value.TLabel",
+        ).grid(row=row, column=1, sticky="ew", pady=6)
+
+    wrapping_label(
+        results, text="Distances are measured from the primary body's centre.",
+    ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
+    details_text = tk.StringVar(master=root)
+    details = ttk.Frame(results)
+    details.columnconfigure(0, weight=1)
+    details.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    wrapping_label(details, textvariable=details_text).grid(
+        row=0, column=0, sticky="ew",
+    )
+    details.grid_remove()
+
+    def hide_details():
+        details.grid_remove()
+        details_button.configure(text="Show details ▾")
+
+    def toggle_details():
+        if details.winfo_manager():
+            hide_details()
+        else:
+            details.grid()
+            details_button.configure(text="Hide details ▴")
+
+    details_button = ttk.Button(
+        results, text="Show details ▾", command=toggle_details, state="disabled",
+    )
+    details_button.grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+    def clear_results():
+        fluid_text.set("—")
+        rigid_text.set("—")
+        details_text.set("")
+        hide_details()
+        details_button.state(["disabled"])
+
+    def calculate(*_):
         try:
-            R_primary = float(radius_entry.get()) * 1000   # km → m
-            density_primary = float(rho_primary_entry.get())  # kg/m^3
-            density_secondary = float(rho_secondary_entry.get())
+            values = []
+            for entry, name in (
+                (radius_entry, "Primary radius"),
+                (rho_primary_entry, "Primary density"),
+                (rho_secondary_entry, "Secondary density"),
+            ):
+                try:
+                    value = float(entry.get())
+                except ValueError:
+                    raise ValueError(f"{name}: enter a number.") from None
+                if not math.isfinite(value) or value <= 0:
+                    raise ValueError(f"{name}: enter a finite number greater than zero.")
+                values.append(value)
 
-            if density_primary <= 0 or density_secondary <= 0 or R_primary <= 0:
-                result_label.config(text="Error: All values must be positive.")
-                return
+            radius_km, primary_g_cm3, secondary_g_cm3 = values
+            radius_m = radius_km * 1000
+            density_primary = primary_g_cm3 * 1000  # g/cm³ → kg/m³
+            density_secondary = secondary_g_cm3 * 1000
+            ratio = (density_primary / density_secondary) ** (1 / 3)
+            fluid_m = 2.44 * radius_m * ratio
+            rigid_m = 1.26 * radius_m * ratio
+            if not all(math.isfinite(value) and value > 0 for value in (fluid_m, rigid_m)):
+                raise ValueError("Values are outside the supported numeric range.")
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(str(error))
+            error_label.grid()
+            return
 
-            ratio = (density_primary / density_secondary) ** (1/3)
+        error_text.set("")
+        error_label.grid_remove()
+        fluid_text.set(f"{fluid_m / 1000:,.3f} km")
+        rigid_text.set(f"{rigid_m / 1000:,.3f} km")
+        details_text.set(
+            f"Primary radius: {radius_km:g} km\n"
+            f"Primary density: {primary_g_cm3:g} g/cm³\n"
+            f"Secondary density: {secondary_g_cm3:g} g/cm³\n\n"
+            f"Fluid limit: {fluid_m / radiusearth:.3f} Earth radii\n"
+            f"Rigid limit: {rigid_m / radiusearth:.3f} Earth radii\n\n"
+            "Model: d = k × R × (primary density / secondary density)^(1/3).\n"
+            "k = 2.44 for the fluid estimate; k = 1.26 for the rigid estimate.\n"
+            "Idealised tidal estimates; material strength and other effects are omitted."
+        )
+        details_button.state(["!disabled"])
 
-            roche_fluid = 2.44 * R_primary * ratio
-            roche_rigid = 1.26 * R_primary * ratio
+    def reset():
+        for entry in (radius_entry, rho_primary_entry, rho_secondary_entry):
+            entry.delete(0, tk.END)
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        radius_entry.focus_set()
 
-            result_label.config(text=
-                f"Roche Limit Calculator\n"
-                f"==============================\n"
-                f"Primary Radius: {R_primary/1000:.3f} km\n"
-                f"Density Primary: {density_primary} kg/m³\n"
-                f"Density Secondary: {density_secondary} kg/m³\n"
-                f"------------------------------\n"
-                f"Fluid Roche Limit: {roche_fluid/1000:.3f} km\n"
-                f"                             {roche_fluid/radiusearth:.3f} rE\n"
-                f"Rigid Roche Limit: {roche_rigid/1000:.3f} km\n"
-                f"                             {roche_rigid/radiusearth:.3f} rE\n"
-            )
-        except ValueError:
-            result_label.config(text="Error: Please enter valid numbers.")
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    for entry in (radius_entry, rho_primary_entry, rho_secondary_entry):
+        entry.bind("<Return>", calculate)
 
-    # UI layout
-    frame = tk.Frame(root, width=520, height=420)
-    frame.pack()
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            direction = -1 if event.delta > 0 or getattr(event, "num", None) == 4 else 1
+            viewport.yview_scroll(direction * 3, "units")
+            return "break"
 
-    title = tk.Label(frame, text="Roche Limit Calculator", font=("Arial", 12, "bold"))
-    title.pack(pady=10)
+    def bind_scrolling(widget):
+        # Local bindings are removed with the tab; other calculators are unaffected.
+        widget.bind("<MouseWheel>", scroll_page, add="+")
+        widget.bind("<Button-4>", scroll_page, add="+")
+        widget.bind("<Button-5>", scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
 
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
-
-    tk.Label(input_frame, text="Primary Radius [km]: ").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-    radius_entry = tk.Entry(input_frame, width=15)
-    radius_entry.grid(row=0, column=1, padx=5, pady=5)
-
-    tk.Label(input_frame, text="Primary Density [kg/m³]: ").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-    rho_primary_entry = tk.Entry(input_frame, width=15)
-    rho_primary_entry.grid(row=1, column=1, padx=5, pady=5)
-
-    tk.Label(input_frame, text="Secondary Density [kg/m³]: ").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-    rho_secondary_entry = tk.Entry(input_frame, width=15)
-    rho_secondary_entry.grid(row=2, column=1, padx=5, pady=5)
-
-    calculate_button = tk.Button(frame, text="Calculate", command=calculate)
-    calculate_button.pack(pady=10)
-
-    result_label = tk.Label(frame, justify="left")
-    result_label.pack(pady=20)
-
-    radius_entry.bind("<Return>", calculate)
-    rho_primary_entry.bind("<Return>", calculate)
-    rho_secondary_entry.bind("<Return>", calculate)
-
-    radius_entry.focus()
+    bind_scrolling(viewport)
+    radius_entry.focus_set()
