@@ -406,168 +406,301 @@ def relativistic_kinetic_energy_UI(root):
 
 
 
-def relativistic_kinetic_energy_UI2(root):
-
-    import tkinter as tk
-    import math
-
-    c = 299792458
-
-    frame = tk.Frame(root)
-    frame.pack(padx=10, pady=10)
-
-    # False = m/s
-    # True = fraction of c
-    velocity_mode = tk.BooleanVar(value=False)
-
-    tk.Label(frame, text="Mass [kg]").grid(row=0, column=0)
-
-    mass_entry = tk.Entry(frame)
-    mass_entry.grid(row=0, column=1)
-
-    velocity_label = tk.Label(frame, text="Velocity [m/s]")
-    velocity_label.grid(row=1, column=0)
-
-    vel_entry = tk.Entry(frame)
-    vel_entry.grid(row=1, column=1)
-
-    result = tk.Label(frame, justify=tk.LEFT)
-    result.grid(row=4, column=0, columnspan=2, pady=10)
-
-    def toggle_velocity_mode():
-
-        velocity_mode.set(not velocity_mode.get())
-
-        if velocity_mode.get():
-            velocity_label.config(
-                text="Velocity [fraction of c]"
-            )
-            mode_button.config(
-                text="Input Mode: Fraction of c"
-            )
-        else:
-            velocity_label.config(
-                text="Velocity [m/s]"
-            )
-            mode_button.config(
-                text="Input Mode: m/s"
-            )
-
-    def smart_format(value):
-
-        if value == 0:
-            return "0"
-
-        if 0.001 <= abs(value) < 100000:
-            return f"{value:.3f}"
-
-        return f"{value:.3e}"
+def _format_conversion_value(value):
+    """Keep readable conversions decimal; retain small/large ones in scientific notation."""
+    if value == 0:
+        return "0"
+    if 0.001 <= abs(value) < 1000:
+        formatted = f"{value:.6g}"
+        # Rounding must not turn an eligible value into a four-digit result.
+        return str(value) if abs(float(formatted)) >= 1000 else formatted
+    return f"{value:.6e}"
 
 
-    def calculate(*args):
+def _visible_conversions(conversions, base_unit):
+    """Select the requested range, with a base-unit fallback (including zero)."""
+    readable = [row for row in conversions if 0.001 <= abs(row[1]) < 1000]
+    return readable or [next(row for row in conversions if row[2] == base_unit)]
 
-        try:
-            m = float(mass_entry.get())
-            v_input = float(vel_entry.get())
 
-            if velocity_mode.get():
-                v = v_input * c
+def _conversion_calculator_UI(root, description, field_specs, result_title, base_unit, evaluator, hint):
+    """Scrollable input/result cards with a compact answer and expandable conversions."""
+    for widget in root.winfo_children():
+        widget.destroy()
+
+    style = ttk.Style(root)
+    style.configure("ConversionCalc.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("ConversionCalc.Error.TLabel", foreground="#a12622")
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(
+        shell, width=1, height=1, highlightthickness=0,
+        background=style.lookup("TFrame", "background") or "#eeeeee",
+    )
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        narrow = event.width < 580
+        for index, (label, entry, unit_widget) in enumerate(fields):
+            if narrow:
+                label.grid_configure(row=index * 2, column=0, columnspan=3, padx=0)
+                entry.grid_configure(row=index * 2 + 1, column=0, columnspan=2)
+                unit_widget.grid_configure(row=index * 2 + 1, column=2)
             else:
-                v = v_input
+                label.grid_configure(row=index, column=0, columnspan=1, padx=(0, 16))
+                entry.grid_configure(row=index, column=1, columnspan=1)
+                unit_widget.grid_configure(row=index, column=2)
 
-            if v >= c:
-                result.config(
-                    text="Velocity must be below c"
-                )
-                return
+    def update_scroll_region(_event=None):
+        viewport.configure(scrollregion=viewport.bbox("all"))
 
-            if v < 0:
-                result.config(
-                    text="Velocity cannot be negative"
-                )
-                return
+    viewport.bind("<Configure>", resize_page)
+    page.bind("<Configure>", update_scroll_region)
 
-            if m <= 0:
-                result.config(
-                    text="Mass must be positive"
-                )
-                return
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
 
-            gamma = 1 / math.sqrt(
-                1 - (v * v) / (c * c)
+        def fit_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+
+        label.bind("<Configure>", fit_text)
+        return label
+
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
+
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
+
+    wrapping_label(page, text=description).grid(row=0, column=0, sticky="ew", pady=(0, 16))
+    inputs = ttk.LabelFrame(page, text="Inputs", padding=16)
+    inputs.grid(row=1, column=0, sticky="ew")
+    inputs.columnconfigure(1, weight=1)
+    fields, unit_vars = [], []
+    for row, (name, units) in enumerate(field_specs):
+        label = ttk.Label(inputs, text=name)
+        label.grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+        entry = ttk.Entry(inputs, width=14)
+        entry.grid(row=row, column=1, sticky="ew", pady=6)
+        choices = (units,) if isinstance(units, str) else units
+        unit_var = tk.StringVar(master=root, value=choices[0])
+        if len(choices) == 1:
+            unit_widget = ttk.Label(inputs, textvariable=unit_var)
+        else:
+            unit_widget = ttk.Combobox(
+                inputs, textvariable=unit_var, values=choices, state="readonly", width=14,
             )
+        unit_widget.grid(row=row, column=2, sticky="w", padx=(8, 0), pady=6)
+        fields.append((label, entry, unit_widget))
+        unit_vars.append(unit_var)
 
-            KE = (gamma - 1) * m * c * c
+    hint_row = len(fields) * 2
+    wrapping_label(inputs, text=hint).grid(
+        row=hint_row, column=0, columnspan=3, sticky="ew", pady=(8, 0),
+    )
+    actions = ttk.Frame(inputs)
+    actions.grid(row=hint_row + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(inputs, textvariable=error_text, style="ConversionCalc.Error.TLabel")
+    error_label.grid(row=hint_row + 2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
 
-            if KE < 4.184e18:
-                result.config(
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(0, weight=1)
+    wrapping_label(results, text=result_title).grid(row=0, column=0, sticky="ew", pady=(0, 6))
+    main_rows = ttk.Frame(results)
+    main_rows.grid(row=1, column=0, sticky="ew")
+    summary_text = tk.StringVar(master=root)
+    summary_label = wrapping_label(results, textvariable=summary_text)
+    summary_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+    summary_label.grid_remove()
+    wrapping_label(
+        results, text="Showing conversions from 0.001 to below 1000; otherwise the base unit.",
+    ).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
-                text=
-                f"Lorentz factor γ = {gamma:.8g}\n"
-                f"--------------------------------\n"
-                f"Kinetic Energy = {smart_format(KE)} J\n"
-                f"--------------------------------\n"
-                f"Kg TNT = {smart_format(KE / 4.184e6)} kg\n"
-                f"t  TNT = {smart_format(KE / 4.184e9)} t\n"
-                f"Kt TNT = {smart_format(KE / 4.184e12)} kt\n"
-                f"Mt TNT = {smart_format(KE / 4.184e15)} Mt\n"
-                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt"
+    expanded = ttk.Frame(results)
+    expanded.columnconfigure(0, weight=1)
+    expanded.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+    expanded.grid_remove()
+    all_rows = ttk.Frame(expanded)
+    all_rows.grid(row=0, column=0, sticky="ew")
+    details_text = tk.StringVar(master=root)
+    wrapping_label(expanded, textvariable=details_text).grid(
+        row=1, column=0, sticky="ew", pady=(16, 0),
+    )
 
-
-                )
-                return
-
-            if KE > 4.184e18:
-                result.config(
-
-                text=
-                f"Lorentz factor γ = {gamma:.8g}\n"
-                f"--------------------------------\n"
-                f"Kinetic Energy = {smart_format(KE)} J\n"
-                f"--------------------------------\n"
-                f"Mt TNT = {smart_format(KE / 4.184e15)} Mt\n"
-                f"Gt TNT = {smart_format(KE / 4.184e18)} Gt\n"       
-                f"Hiroshimas = {smart_format(KE / (4.184e12 * 15))} Little Boys\n"
-                f"Tsar Bombs = {smart_format(KE / (4.184e18 * 50))} Tsars\n"
-                f"dino killers = {smart_format(KE / 1e26)} Meteors\n"
-                f"Type 1a = {smart_format(KE / 1.5e44)} Supernovae"
-                )
-                return
-
-
-
-        except ValueError:
-            result.config(
-                text="Invalid input"
+    def populate_rows(container, conversions, bold=False):
+        for widget in container.winfo_children():
+            widget.destroy()
+        container.columnconfigure(0, weight=1)
+        container.columnconfigure(1, weight=2)
+        if not conversions:
+            label = wrapping_label(container, text="—", style="ConversionCalc.Value.TLabel")
+            label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=6)
+            bind_scrolling(label)
+        for row, (name, value, unit) in enumerate(conversions):
+            label = wrapping_label(container, text=name)
+            label.grid(row=row, column=0, sticky="new", padx=(0, 16), pady=6)
+            value_label = wrapping_label(
+                container, text=f"{_format_conversion_value(value)} {unit}",
+                style="ConversionCalc.Value.TLabel" if bold else "TLabel",
             )
+            value_label.grid(row=row, column=1, sticky="new", pady=6)
+            # Result widgets are replaced on every calculation, so bind the new ones too.
+            bind_scrolling(label)
+            bind_scrolling(value_label)
 
-    mode_button = tk.Button(
-        frame,
-        text="Input Mode: m/s",
-        command=toggle_velocity_mode
-    )
-    mode_button.grid(
-        row=2,
-        column=0,
-        columnspan=2,
-        pady=5
-    )
+    def hide_conversions():
+        expanded.grid_remove()
+        conversions_button.configure(text="Show all conversions ▾")
 
-    calculate_button = tk.Button(
-        frame,
-        text="Calculate",
-        command=calculate
-    )
-    calculate_button.grid(
-        row=3,
-        column=0,
-        columnspan=2
-    )
+    def toggle_conversions():
+        if expanded.winfo_manager():
+            hide_conversions()
+        else:
+            expanded.grid()
+            conversions_button.configure(text="Hide all conversions ▴")
 
-    mass_entry.bind("<Return>", calculate)
-    vel_entry.bind("<Return>", calculate)
+    conversions_button = ttk.Button(
+        results, text="Show all conversions ▾", command=toggle_conversions, state="disabled",
+    )
+    conversions_button.grid(row=4, column=0, sticky="w", pady=(12, 0))
 
-    mass_entry.focus()
+    def clear_results(*_):
+        populate_rows(main_rows, [])
+        for widget in all_rows.winfo_children():
+            widget.destroy()
+        summary_text.set("")
+        summary_label.grid_remove()
+        details_text.set("")
+        hide_conversions()
+        conversions_button.state(["disabled"])
+
+    def calculate(*_):
+        try:
+            values = []
+            for (name, _units), (_label, entry, _unit) in zip(field_specs, fields):
+                try:
+                    value = float(entry.get())
+                except ValueError:
+                    raise ValueError(f"{name}: enter a number.") from None
+                if not math.isfinite(value):
+                    raise ValueError(f"{name}: enter a finite number.")
+                values.append(value)
+            conversions, summary, explanation = evaluator(values, [var.get() for var in unit_vars])
+            if not all(math.isfinite(row[1]) for row in conversions):
+                raise ValueError("Values are outside the supported numeric range.")
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(str(error))
+            error_label.grid()
+            return
+        error_text.set("")
+        error_label.grid_remove()
+        populate_rows(main_rows, _visible_conversions(conversions, base_unit), bold=True)
+        populate_rows(all_rows, conversions)
+        summary_text.set(summary)
+        if summary:
+            summary_label.grid()
+        else:
+            summary_label.grid_remove()
+        details_text.set(explanation)
+        conversions_button.state(["!disabled"])
+
+    def reset():
+        for (_label, entry, _unit), var, (_name, units) in zip(fields, unit_vars, field_specs):
+            entry.delete(0, tk.END)
+            var.set(units if isinstance(units, str) else units[0])
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        fields[0][1].focus_set()
+
+    def unit_changed(_event):
+        # A changed unit reinterprets the input; don't leave the old answer on display.
+        clear_results()
+        error_text.set("")
+        error_label.grid_remove()
+
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    for _label, entry, unit_widget in fields:
+        entry.bind("<Return>", calculate)
+        if isinstance(unit_widget, ttk.Combobox):
+            unit_widget.bind("<<ComboboxSelected>>", unit_changed)
+            unit_widget.bind("<Return>", calculate)
+
+    bind_scrolling(viewport)
+    clear_results()
+    fields[0][1].focus_set()
+
+
+def relativistic_kinetic_energy_UI2(root):
+    def evaluate(values, units):
+        mass, velocity_input = values
+        speed_of_light = 299792458  # Preserve this calculator's existing value.
+        if mass <= 0:
+            raise ValueError("Mass must be greater than zero.")
+        if velocity_input < 0:
+            raise ValueError("Velocity cannot be negative.")
+        fraction_mode = units[1] == "fraction of c"
+        if velocity_input >= (1 if fraction_mode else speed_of_light):
+            raise ValueError("Velocity must be below c (below 1 in fraction-of-c mode).")
+        beta = velocity_input if fraction_mode else velocity_input / speed_of_light
+        velocity = velocity_input * speed_of_light if fraction_mode else velocity_input
+        inverse_gamma = math.sqrt((1 - beta) * (1 + beta))
+        gamma = 1 / inverse_gamma
+        # Algebraically equal to (gamma - 1) * m * c², without low-speed cancellation.
+        energy = (mass * (velocity / (1 + inverse_gamma))) * (velocity / inverse_gamma)
+        if not math.isfinite(energy) or (velocity_input > 0 and energy == 0):
+            raise ValueError("Values are outside the supported numeric range.")
+        # Keep all existing unit names and comparison divisors, regardless of energy.
+        conversions = [
+            ("Kinetic Energy", energy, "J"),
+            ("Kg TNT", energy / 4.184e6, "kg"),
+            ("t TNT", energy / 4.184e9, "t"),
+            ("Kt TNT", energy / 4.184e12, "kt"),
+            ("Mt TNT", energy / 4.184e15, "Mt"),
+            ("Gt TNT", energy / 4.184e18, "Gt"),
+            ("Hiroshimas", energy / (4.184e12 * 15), "Little Boys"),
+            ("Tsar Bombs", energy / (4.184e18 * 50), "Tsars"),
+            ("dino killers", energy / 1e26, "Meteors"),
+            ("Type 1a", energy / 1.5e44, "Supernovae"),
+        ]
+        explanation = (
+            f"Mass: {mass:.6g} kg\n"
+            f"Velocity: {velocity:.6g} m/s ({beta:.8g} c)\n\n"
+            "Formula: KE = (γ − 1) × m × c²\n"
+            "γ = 1 / √(1 − (v/c)²); c = 299792458 m/s.\n"
+            "Explosion comparisons retain AstroCalc's existing conversion factors."
+        )
+        return conversions, f"Lorentz factor γ = {gamma:.8g}", explanation
+
+    _conversion_calculator_UI(
+        root, "Calculate kinetic energy at speeds below the speed of light.",
+        (("Mass", "kg"), ("Velocity", ("m/s", "fraction of c"))),
+        "Kinetic energy", "J", evaluate,
+        "Mass must be positive. For fraction of c, enter 0.5 for half light speed.",
+    )
 
 
 
@@ -763,20 +896,51 @@ def relativistic_kinetic_energy_UI3(root):
 
 
 
+def _particle_mass_energy(mass, value, mode):
+    """Return particle energies in eV and motion in SI, using the existing constants."""
+    speed_of_light = 299792458
+    e_charge = 1.602176634e-19
+    if not math.isfinite(mass) or mass <= 0 or not math.isfinite(value):
+        raise ValueError("Enter finite numbers and select a particle with positive mass.")
+    rest_energy = mass * speed_of_light ** 2 / e_charge
+    if mode == "Velocity → Energy":
+        if not 0 <= value < speed_of_light:
+            raise ValueError("Velocity must be 0 ≤ v < c (299792458 m/s).")
+        velocity = value
+        beta = velocity / speed_of_light
+        inverse_gamma = math.sqrt((1 - beta) * (1 + beta))
+        gamma = 1 / inverse_gamma
+        # Avoid subtracting nearly equal total/rest energies at low speeds.
+        kinetic_energy = (rest_energy * (beta / (1 + inverse_gamma))) * (beta / inverse_gamma)
+        total_energy = gamma * rest_energy
+        if value > 0 and kinetic_energy == 0:
+            raise ValueError("Velocity is too small for the supported numeric range.")
+    elif mode == "Energy → Velocity":
+        if value < rest_energy:
+            raise ValueError(f"Total energy must be at least the rest energy: {rest_energy!r} eV.")
+        total_energy = value
+        kinetic_energy = total_energy - rest_energy
+        gamma = total_energy / rest_energy
+        # Stable near rest energy, and avoids squaring a potentially huge gamma.
+        beta = math.sqrt((kinetic_energy / total_energy) * (1 + rest_energy / total_energy))
+        velocity = beta * speed_of_light
+    else:
+        raise ValueError("Select a valid calculation mode.")
+    result = {
+        "mass": mass, "velocity": velocity, "beta": beta, "gamma": gamma,
+        "rest": rest_energy, "kinetic": kinetic_energy, "total": total_energy,
+    }
+    if not all(math.isfinite(number) for number in result.values()):
+        raise ValueError("Values are outside the supported numeric range.")
+    return result
+
+
 def relativistic_kinetic_energy_UI4(root):
-    import tkinter as tk
-    import math
-
+    """Particle mass–energy calculator, retaining both original calculation modes."""
     for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+        widget.destroy()
 
-    c = 299_792_458
-    e_charge = 1.602176634e-19  # J per eV
-
-    # -------------------------
-    # PARTICLE MASS DATABASE (kg)
-    # -------------------------
+    # Preserve the existing particle presets and masses (kg).
     particles = {
         "Electron": 9.1093837015e-31,
         "Muon": 1.883531627e-28,
@@ -787,139 +951,267 @@ def relativistic_kinetic_energy_UI4(root):
         "Neutron": 1.67492749804e-27,
         "Higgs boson": 2.24e-25,
     }
+    modes = ("Velocity → Energy", "Energy → Velocity")
+    energy_units = (("eV", 1), ("keV", 1e3), ("MeV", 1e6), ("GeV", 1e9),
+                    ("TeV", 1e12), ("PeV", 1e15), ("EeV", 1e18))
+    mass_units = (("kg", 1), ("t", 1e3), ("kt", 1e6), ("Mt", 1e9))
+    style = ttk.Style(root)
+    style.configure("ConversionCalc.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("ConversionCalc.Error.TLabel", foreground="#a12622")
 
-    # -------------------------
-    # FORMATTERS
-    # -------------------------
-    def format_energy(joules):
-        ev = joules / e_charge
-        units = [("eV", 1), ("keV", 1e3), ("MeV", 1e6), ("GeV", 1e9),
-                  ("TeV", 1e12), ("PeV", 1e15), ("EeV", 1e18)]
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(
+        shell, width=1, height=1, highlightthickness=0,
+        background=style.lookup("TFrame", "background") or "#eeeeee",
+    )
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
 
-        if ev == 0:
-            return "0 eV"
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        narrow = event.width < 580
+        for index, (label, field, unit) in enumerate(fields):
+            if narrow:
+                label.grid_configure(row=index * 2, column=0, columnspan=3, padx=0)
+                field.grid_configure(row=index * 2 + 1, column=0, columnspan=2)
+                unit.grid_configure(row=index * 2 + 1, column=2)
+            else:
+                label.grid_configure(row=index, column=0, columnspan=1, padx=(0, 16))
+                field.grid_configure(row=index, column=1, columnspan=1)
+                unit.grid_configure(row=index, column=2)
 
-        for name, factor in reversed(units):
-            if abs(ev) >= factor:
-                return f"{ev/factor:.4g} {name}"
+    def update_scroll_region(_event=None):
+        viewport.configure(scrollregion=viewport.bbox("all"))
 
-        return f"{ev:.4g} eV"
+    viewport.bind("<Configure>", resize_page)
+    page.bind("<Configure>", update_scroll_region)
 
-    def format_mass(kg):
-        units = [("kg", 1), ("t", 1e3), ("kt", 1e6), ("Mt", 1e9)]
-        if kg == 0:
-            return "0 kg"
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
 
-        for name, factor in reversed(units):
-            if abs(kg) >= factor:
-                return f"{kg/factor:.4g} {name}"
+        def fit_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
 
-        return f"{kg:.4g} kg"
+        label.bind("<Configure>", fit_text)
+        return label
 
-    # -------------------------
-    # CALCULATION
-    # -------------------------
-    def calculate(*args):
-        try:
-            mass = particles[particle_var.get()]
-        except KeyError:
-            result_label.config(text="Invalid particle selection")
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
+
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
+
+    wrapping_label(
+        page, text="Explore a particle's rest, kinetic, and total energy—or find its speed from total energy.",
+    ).grid(row=0, column=0, sticky="ew", pady=(0, 16))
+    inputs = ttk.LabelFrame(page, text="Inputs", padding=16)
+    inputs.grid(row=1, column=0, sticky="ew")
+    inputs.columnconfigure(1, weight=1)
+    particle_var = tk.StringVar(master=root, value="Electron")
+    mode_var = tk.StringVar(master=root, value=modes[0])
+    input_unit = tk.StringVar(master=root, value="m/s")
+    hint_text = tk.StringVar(master=root)
+    particle_box = ttk.Combobox(
+        inputs, textvariable=particle_var, values=tuple(particles), state="readonly", width=1,
+    )
+    mode_box = ttk.Combobox(inputs, textvariable=mode_var, values=modes, state="readonly", width=1)
+    entry = ttk.Entry(inputs, width=14)
+    fields = []
+    for row, (name, field, unit) in enumerate((
+        ("Particle", particle_box, ttk.Label(inputs, text="")),
+        ("Mode", mode_box, ttk.Label(inputs, text="")),
+        ("Velocity", entry, ttk.Label(inputs, textvariable=input_unit)),
+    )):
+        label = ttk.Label(inputs, text=name)
+        label.grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+        field.grid(row=row, column=1, sticky="ew", pady=6)
+        unit.grid(row=row, column=2, sticky="w", padx=(8, 0), pady=6)
+        fields.append((label, field, unit))
+    wrapping_label(inputs, textvariable=hint_text).grid(
+        row=6, column=0, columnspan=3, sticky="ew", pady=(8, 0),
+    )
+    actions = ttk.Frame(inputs)
+    actions.grid(row=7, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(inputs, textvariable=error_text, style="ConversionCalc.Error.TLabel")
+    error_label.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
+
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(0, weight=1)
+    main_rows = ttk.Frame(results)
+    main_rows.grid(row=0, column=0, sticky="ew")
+    summary_text = tk.StringVar(master=root)
+    summary_label = wrapping_label(results, textvariable=summary_text)
+    summary_label.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+    summary_label.grid_remove()
+    wrapping_label(
+        results, text="Showing conversions from 0.001 to below 1000; otherwise the base unit.",
+    ).grid(row=2, column=0, sticky="ew", pady=(12, 0))
+
+    expanded = ttk.Frame(results)
+    expanded.columnconfigure(0, weight=1)
+    expanded.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+    expanded.grid_remove()
+    all_rows = ttk.Frame(expanded)
+    all_rows.grid(row=0, column=0, sticky="ew")
+    details_text = tk.StringVar(master=root)
+    wrapping_label(expanded, textvariable=details_text).grid(
+        row=1, column=0, sticky="ew", pady=(16, 0),
+    )
+
+    def populate_rows(container, groups, compact=False):
+        for widget in container.winfo_children():
+            widget.destroy()
+        container.columnconfigure(0, weight=1)
+        container.columnconfigure(1, weight=2)
+        if not groups:
+            label = wrapping_label(container, text="—", style="ConversionCalc.Value.TLabel")
+            label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=6)
+            bind_scrolling(label)
             return
+        row = 0
+        for conversions, base_unit in groups:
+            visible = _visible_conversions(conversions, base_unit) if compact else conversions
+            for index, (name, value, unit) in enumerate(visible):
+                padding = (12 if row and index == 0 else 4, 4)
+                label = wrapping_label(container, text=name if index == 0 else "")
+                label.grid(row=row, column=0, sticky="new", padx=(0, 16), pady=padding)
+                answer = wrapping_label(
+                    container, text=f"{_format_conversion_value(value)} {unit}",
+                    style="ConversionCalc.Value.TLabel" if compact else "TLabel",
+                )
+                answer.grid(row=row, column=1, sticky="new", pady=padding)
+                bind_scrolling(label)
+                bind_scrolling(answer)
+                row += 1
 
-        mode = mode_var.get()
+    def hide_conversions():
+        expanded.grid_remove()
+        conversions_button.configure(text="Show all conversions ▾")
 
-        try:
-            if mode == "Velocity → Energy":
-                velocity = float(entry1.get())
-
-                if velocity < 0 or velocity >= c:
-                    result_label.config(text="Velocity must be 0 ≤ v < c")
-                    return
-
-                beta = velocity / c
-                gamma = 1 / math.sqrt(1 - beta**2)
-
-            else:  # Energy → Velocity
-                energy_ev = float(entry1.get())
-                energy = energy_ev * e_charge
-
-                rest_energy = mass * c**2
-                gamma = energy / rest_energy
-
-                if gamma < 1:
-                    result_label.config(text="Energy must be ≥ rest energy")
-                    return
-
-                beta = math.sqrt(1 - 1 / gamma**2)
-                velocity = beta * c
-
-        except ValueError:
-            result_label.config(text="Invalid numeric input")
-            return
-
-        rest_energy = mass * c**2
-        total_energy = gamma * rest_energy
-        kinetic_energy = total_energy - rest_energy
-
-        result_label.config(text=
-            f"Particle mass:\n{format_mass(mass)}\n"
-            f"------------------------\n"
-            f"β = v/c:\n{beta:.10f}\n"
-            f"Velocity:\n{velocity:.6e} m/s\n"
-            f"------------------------\n"
-            f"Lorentz factor γ:\n{gamma:.8g}\n"
-            f"------------------------\n"
-            f"Rest Energy:\n{format_energy(rest_energy)}\n"
-            f"Kinetic Energy:\n{format_energy(kinetic_energy)}\n"
-            f"Total Energy:\n{format_energy(total_energy)}"
-        )
-
-    # -------------------------
-    # UI
-    # -------------------------
-    frame = tk.Frame(root)
-    frame.pack(padx=10, pady=10)
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=10)
-
-    # particle dropdown
-    tk.Label(input_frame, text="Particle:").grid(row=0, column=0, sticky="w")
-
-    particle_var = tk.StringVar(value="Electron")
-    tk.OptionMenu(input_frame, particle_var, *particles.keys()).grid(row=0, column=1)
-
-    # mode selector
-    mode_var = tk.StringVar(value="Velocity → Energy")
-
-    tk.Label(input_frame, text="Mode:").grid(row=1, column=0, sticky="w")
-    tk.OptionMenu(input_frame, mode_var,
-                  "Velocity → Energy",
-                  "Energy → Velocity").grid(row=1, column=1)
-
-    # input field
-    tk.Label(input_frame, text="Input:").grid(row=2, column=0, sticky="w")
-    entry1 = tk.Entry(input_frame)
-    entry1.grid(row=2, column=1)
-
-    def update_label(*args):
-        if mode_var.get() == "Velocity → Energy":
-            entry1_label.config(text="Velocity [m/s]")
+    def toggle_conversions():
+        if expanded.winfo_manager():
+            hide_conversions()
         else:
-            entry1_label.config(text="Energy [eV]")
+            expanded.grid()
+            conversions_button.configure(text="Hide all conversions ▴")
 
-    entry1_label = tk.Label(input_frame, text="Velocity [m/s]")
-    entry1_label.grid(row=2, column=2, padx=10)
+    conversions_button = ttk.Button(
+        results, text="Show all conversions ▾", command=toggle_conversions, state="disabled",
+    )
+    conversions_button.grid(row=3, column=0, sticky="w", pady=(12, 0))
 
-    mode_var.trace_add("write", update_label)
+    def clear_results():
+        populate_rows(main_rows, [])
+        for widget in all_rows.winfo_children():
+            widget.destroy()
+        summary_text.set("")
+        summary_label.grid_remove()
+        details_text.set("")
+        hide_conversions()
+        conversions_button.state(["disabled"])
 
-    # buttons
-    tk.Button(frame, text="Calculate", command=calculate).pack(pady=10)
+    def update_inputs(_event=None):
+        reverse = mode_var.get() == modes[1]
+        fields[2][0].configure(text="Total energy" if reverse else "Velocity")
+        input_unit.set("eV" if reverse else "m/s")
+        mass = particles.get(particle_var.get())
+        if reverse and mass is not None:
+            rest_ev = mass * 299792458 ** 2 / 1.602176634e-19
+            hint_text.set(
+                "Enter total energy, including rest energy—not just kinetic energy.\n"
+                f"Minimum for {particle_var.get()}: {rest_ev!r} eV."
+            )
+        else:
+            hint_text.set("Enter velocity in m/s, from zero up to (but not including) 299792458.")
+        clear_results()
+        error_text.set("")
+        error_label.grid_remove()
 
-    result_label = tk.Label(frame, justify=tk.LEFT, anchor="w")
-    result_label.pack(pady=10)
+    def calculate(*_):
+        try:
+            if particle_var.get() not in particles:
+                raise ValueError("Select a valid particle.")
+            try:
+                value = float(entry.get())
+            except ValueError:
+                raise ValueError(f"{fields[2][0].cget('text')}: enter a number.") from None
+            if not math.isfinite(value):
+                raise ValueError(f"{fields[2][0].cget('text')}: enter a finite number.")
+            data = _particle_mass_energy(particles[particle_var.get()], value, mode_var.get())
+            groups = [
+                ([(name, data[key] / factor, unit) for unit, factor in energy_units], "eV")
+                for name, key in (("Rest energy", "rest"), ("Kinetic energy", "kinetic"), ("Total energy", "total"))
+            ]
+            groups.append(([("Velocity", data["velocity"], "m/s")], "m/s"))
+            groups.append(([
+                ("Particle mass", data["mass"] / factor, unit) for unit, factor in mass_units
+            ], "kg"))
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(str(error))
+            error_label.grid()
+            return
+        error_text.set("")
+        error_label.grid_remove()
+        populate_rows(main_rows, groups, compact=True)
+        populate_rows(all_rows, groups)
+        beta_text = f"{data['beta']:.10g}"
+        if beta_text == "1":
+            beta_text = "≈ 1 (below 1)"
+        summary = f"β = v/c: {beta_text}\nLorentz factor γ: {data['gamma']:.8g}"
+        if float(_format_conversion_value(data["velocity"])) >= 299792458:
+            summary += "\nSpeed is below c; the displayed velocity is rounded."
+        summary_text.set(summary)
+        summary_label.grid()
+        details_text.set(
+            f"Particle: {particle_var.get()}\n"
+            f"Input: {value:.12g} {input_unit.get()}\n\n"
+            "Rest energy: E₀ = m × c²\n"
+            "Total energy: E = γ × E₀\n"
+            "Kinetic energy: KE = E − E₀\n"
+            "γ = 1 / √(1 − (v/c)²)\n"
+            "Reverse mode: v = c × √(1 − (E₀/E)²)\n\n"
+            "c = 299792458 m/s; 1 eV = 1.602176634 × 10⁻¹⁹ J.\n"
+            "Particle masses retain AstroCalc's existing preset values."
+        )
+        conversions_button.state(["!disabled"])
 
-    entry1.bind("<Return>", calculate)
+    def reset():
+        particle_var.set("Electron")
+        mode_var.set(modes[0])
+        entry.delete(0, tk.END)
+        update_inputs()
+        viewport.yview_moveto(0)
+        entry.focus_set()
+
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    entry.bind("<Return>", calculate)
+    for box in (particle_box, mode_box):
+        box.bind("<<ComboboxSelected>>", update_inputs)
+        box.bind("<Return>", calculate)
+    bind_scrolling(viewport)
+    update_inputs()
+    entry.focus_set()
 
 #====================================================================================
 def calculate_hohmann_transfer(mu, body_radius, start_km, target_km):
@@ -2339,56 +2631,32 @@ def spectral_class3_UI(root):
 
 
 def schwarzschild_radius_UI2(root):
-    for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+    def evaluate(values, _units):
+        mass = values[0]
+        # Retain the existing input limit, constants, and solar-radius conversion.
+        if mass < 2.2e-8:
+            raise ValueError("Mass must be at least 2.2 × 10⁻⁸ kg (22 micrograms).")
+        radius = 2 * G * mass / c ** 2
+        conversions = [
+            ("Nanometres", radius * 1e9, "nm"),
+            ("Metres", radius, "m"),
+            ("Kilometres", radius / 1000, "km"),
+            ("Solar radii", radius / 6.957e8, "R☉"),
+        ]
+        explanation = (
+            f"Mass: {mass:.6g} kg\n\n"
+            "Formula: rₛ = 2 × G × M / c²\n"
+            f"G = {G:.6g} m³/(kg·s²); c = {c:.6g} m/s.\n"
+            "1 R☉ = 6.957 × 10⁸ m.\n"
+            "The Schwarzschild model assumes a non-rotating, uncharged black hole."
+        )
+        return conversions, "", explanation
 
-    def calculate(*args):
-        try:
-            mass = float(mass_entry.get())
-        except ValueError:
-            result_label.config(text="Error: Invalid input, please enter a number.")
-            return
-
-        if mass < M_min:
-            result_label.config(text="Error: Mass is less than minimum mass of 22 micrograms.")
-        else:
-            radius = 2 * G * mass / c ** 2
-            result_label.config(text=
-                f"Schwarzschild radius:\n"
-                f"========================\n"
-                f"[nm]: {radius * 10 ** 9:.3f} nm\n"
-                f"------------------------\n"
-                f"[m]: {radius:.3f} m\n"
-                f"------------------------\n"
-                f"[km]: {radius / 1000:.3f} km\n"
-                f"------------------------\n"
-                f"[R☉]: {radius / 6.957e8:.2f} R☉\n"
-            )
-
-
-    M_min = 2.2 * 10 ** -8  # Minimum mass in kg
-
-    frame = tk.Frame(root, width=500, height=500)
-    frame.pack()
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
-
-    mass_label = tk.Label(input_frame, text="Mass in [kg]: ")
-    mass_label.pack(side=tk.LEFT)
-
-    mass_entry = tk.Entry(input_frame)
-    mass_entry.pack(side=tk.LEFT)
-    mass_entry.bind("<Return>", calculate)
-
-    calculate_button = tk.Button(input_frame, text="Calculate", command=calculate)
-    calculate_button.pack(side=tk.LEFT, padx=10)
-
-    result_label = tk.Label(frame, justify=tk.LEFT)
-    result_label.pack(pady=50)
-
-    mass_entry.focus()
+    _conversion_calculator_UI(
+        root, "Calculate the Schwarzschild radius for a given mass.",
+        (("Mass", "kg"),), "Schwarzschild radius", "m", evaluate,
+        "Enter mass in kg. Existing input minimum: 2.2 × 10⁻⁸ kg (22 micrograms).",
+    )
 
 
 def hohmann_transfer_UI2(root):
@@ -2761,71 +3029,218 @@ def rocket_deltaV_UI5(root):
 
 
 def stellar_magnitude_UI2(root):
-    # Clear old widgets except menu/buttons
+    """Scrollable stellar magnitude calculator with a prominent absolute magnitude."""
     for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+        widget.destroy()
 
-    def calculate(*args):
+    style = ttk.Style(root)
+    style.configure("Magnitude.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("Magnitude.Error.TLabel", foreground="#a12622")
+
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(
+        shell, width=1, height=1, highlightthickness=0,
+        background=style.lookup("TFrame", "background") or "#eeeeee",
+    )
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        # Stack field labels on narrow tabs, keeping the units beside each entry.
+        narrow = event.width < 580
+        for index, (label, entry, unit) in enumerate(fields):
+            if narrow:
+                label.grid_configure(row=index * 2, column=0, columnspan=3, padx=0)
+                entry.grid_configure(row=index * 2 + 1, column=0, columnspan=2)
+                unit.grid_configure(row=index * 2 + 1, column=2)
+            else:
+                label.grid_configure(row=index, column=0, columnspan=1, padx=(0, 16))
+                entry.grid_configure(row=index, column=1, columnspan=1)
+                unit.grid_configure(row=index, column=2)
+
+    def update_scroll_region(_event=None):
+        viewport.configure(scrollregion=viewport.bbox("all"))
+
+    viewport.bind("<Configure>", resize_page)
+    page.bind("<Configure>", update_scroll_region)
+
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
+
+        def fit_text(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+
+        label.bind("<Configure>", fit_text)
+        return label
+
+    wrapping_label(
+        page, text="Estimate absolute magnitude from apparent magnitude and distance.",
+    ).grid(row=0, column=0, sticky="ew", pady=(0, 16))
+
+    inputs = ttk.LabelFrame(page, text="Inputs", padding=16)
+    inputs.grid(row=1, column=0, sticky="ew")
+    inputs.columnconfigure(1, weight=1)
+    apparent_label = ttk.Label(inputs, text="Apparent magnitude (m)")
+    apparent_label.grid(row=0, column=0, sticky="w", padx=(0, 16), pady=6)
+    apparent_entry = ttk.Entry(inputs, width=14)
+    apparent_entry.grid(row=0, column=1, sticky="ew", pady=6)
+    apparent_unit = ttk.Label(inputs, text="mag")
+    apparent_unit.grid(row=0, column=2, sticky="w", padx=(8, 0), pady=6)
+
+    distance_label = ttk.Label(inputs, text="Distance")
+    distance_label.grid(row=1, column=0, sticky="w", padx=(0, 16), pady=6)
+    distance_entry = ttk.Entry(inputs, width=14)
+    distance_entry.grid(row=1, column=1, sticky="ew", pady=6)
+    unit_var = tk.StringVar(master=root, value="Parsecs")
+    unit_menu = ttk.Combobox(
+        inputs, textvariable=unit_var, values=("Parsecs", "Light-years"),
+        state="readonly", width=12,
+    )
+    unit_menu.grid(row=1, column=2, sticky="w", padx=(8, 0), pady=6)
+    fields = (
+        (apparent_label, apparent_entry, apparent_unit),
+        (distance_label, distance_entry, unit_menu),
+    )
+    wrapping_label(
+        inputs, text="Apparent magnitude may be negative. Distance must be greater than zero.",
+    ).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    actions = ttk.Frame(inputs)
+    actions.grid(row=5, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(inputs, textvariable=error_text, style="Magnitude.Error.TLabel")
+    error_label.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    error_label.grid_remove()
+
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(1, weight=1)
+    result_text = tk.StringVar(master=root, value="—")
+    ttk.Label(results, text="Absolute magnitude (M)").grid(
+        row=0, column=0, sticky="nw", padx=(0, 16), pady=6,
+    )
+    wrapping_label(results, textvariable=result_text, style="Magnitude.Value.TLabel").grid(
+        row=0, column=1, sticky="ew", pady=6,
+    )
+    wrapping_label(
+        results, text="Magnitude at a standard distance of 10 parsecs. Lower values mean brighter objects.",
+    ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
+    details_text = tk.StringVar(master=root)
+    details = ttk.Frame(results)
+    details.columnconfigure(0, weight=1)
+    wrapping_label(details, textvariable=details_text).grid(row=0, column=0, sticky="ew")
+    details.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    details.grid_remove()
+
+    def hide_details():
+        details.grid_remove()
+        details_button.configure(text="Show details ▾")
+
+    def toggle_details():
+        if details.winfo_manager():
+            hide_details()
+        else:
+            details.grid()
+            details_button.configure(text="Hide details ▴")
+
+    details_button = ttk.Button(
+        results, text="Show details ▾", command=toggle_details, state="disabled",
+    )
+    details_button.grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+    def clear_results():
+        result_text.set("—")
+        details_text.set("")
+        hide_details()
+        details_button.state(["disabled"])
+
+    def calculate(*_):
         try:
-            m = float(apparent_entry.get())
-            d = float(distance_entry.get())
+            try:
+                apparent = float(apparent_entry.get())
+            except ValueError:
+                raise ValueError("Apparent magnitude: enter a number.") from None
+            if not math.isfinite(apparent):
+                raise ValueError("Apparent magnitude must be a finite number.")
+            try:
+                distance = float(distance_entry.get())
+            except ValueError:
+                raise ValueError("Distance: enter a number.") from None
+            if not math.isfinite(distance) or distance <= 0:
+                raise ValueError("Distance must be a finite number greater than zero.")
 
-            if d <= 0:
-                result_label.config(text="Error: Distance must be greater than 0.")
-                return
+            # Retain the existing light-year conversion and distance-modulus formula.
+            distance_pc = distance / 3.26156 if unit_var.get() == "Light-years" else distance
+            distance_ly = distance_pc * 3.26156
+            if not math.isfinite(distance_ly) or distance_pc <= 0:
+                raise ValueError("Distance is outside the supported numeric range.")
+            modulus = 5 * (math.log10(distance_pc) - 1)
+            absolute = apparent - modulus
+            if not math.isfinite(absolute):
+                raise ValueError("Values are outside the supported numeric range.")
+        except (ValueError, OverflowError, ZeroDivisionError) as error:
+            clear_results()
+            error_text.set(str(error))
+            error_label.grid()
+            return
 
-            # Convert to parsecs if user selected light-years
-            unit = unit_var.get()
-            if unit == "Light-years":
-                d /= 3.26156  # 1 pc = 3.26156 ly
+        error_text.set("")
+        error_label.grid_remove()
+        magnitude = f"{absolute:.3f}" if abs(absolute) < 1e6 else f"{absolute:.6g}"
+        result_text.set(f"{magnitude} mag")
+        details_text.set(
+            f"Apparent magnitude (m): {apparent:.6g} mag\n"
+            f"Distance: {distance_pc:.6g} pc\n"
+            f"Distance: {distance_ly:.6g} ly\n"
+            f"Distance modulus (m − M): {modulus:.6g} mag\n\n"
+            "Formula: M = m − 5 × (log₁₀(d_pc) − 1)\n"
+            f"M = {apparent:.6g} − ({modulus:.6g}) = {magnitude} mag\n\n"
+            "The calculation assumes no extinction correction.\n"
+            "Use magnitudes in the same photometric band when comparing stars."
+        )
+        details_button.state(["!disabled"])
 
-            # Calculate absolute magnitude
-            M = m - 5 * (math.log10(d) - 1)
+    def reset():
+        for entry in (apparent_entry, distance_entry):
+            entry.delete(0, tk.END)
+        unit_var.set("Parsecs")
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        apparent_entry.focus_set()
 
-            result_label.config(text=
-                f"Stellar Magnitude Calculator\n"
-                f"=============================\n"
-                f"Apparent magnitude (m): {m}\n"
-                f"Distance: {d:.3f} parsecs ({d*3.26156:.3f} ly)\n"
-                f"-----------------------------\n"
-                f"Absolute magnitude (M): {M:.3f}\n"
-            )
+    ttk.Button(actions, text="Calculate", command=calculate).pack(side=tk.LEFT)
+    ttk.Button(actions, text="Reset", command=reset).pack(side=tk.LEFT, padx=(8, 0))
+    for entry in (apparent_entry, distance_entry):
+        entry.bind("<Return>", calculate)
 
-        except ValueError:
-            result_label.config(text="Error: Invalid input. Please enter numbers.")
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
 
-    # --- UI layout ---
-    frame = tk.Frame(root, width=520, height=420)
-    frame.pack()
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
 
-    title = tk.Label(frame, text="Stellar Magnitude Calculator", font=("Arial", 12, "bold"))
-    title.pack(pady=10)
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=20)
-
-    tk.Label(input_frame, text="Apparent Magnitude (m): ").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-    apparent_entry = tk.Entry(input_frame, width=15)
-    apparent_entry.grid(row=0, column=1, padx=5, pady=5)
-
-    tk.Label(input_frame, text="Distance: ").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-    distance_entry = tk.Entry(input_frame, width=15)
-    distance_entry.grid(row=1, column=1, padx=5, pady=5)
-
-    unit_var = tk.StringVar(value="Parsecs")
-    unit_menu = tk.OptionMenu(input_frame, unit_var, "Parsecs", "Light-years")
-    unit_menu.grid(row=1, column=2, padx=5, pady=5)
-
-    calculate_button = tk.Button(frame, text="Calculate", command=calculate)
-    calculate_button.pack(pady=10)
-
-    result_label = tk.Label(frame, justify="left")
-    result_label.pack(pady=20)
-
-    apparent_entry.bind("<Return>", calculate)
-    distance_entry.bind("<Return>", calculate)
-    apparent_entry.focus()
+    bind_scrolling(viewport)
+    apparent_entry.focus_set()
 
 
 def roche_limit_UI(root):
