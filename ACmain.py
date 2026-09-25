@@ -11,9 +11,20 @@ def close_tool_tab(key):
     if tab is None or not tab.winfo_exists():
         return
 
+    selected_tab = notebook.select()
+    if selected_tab == str(tab):
+        tabs = notebook.tabs()
+        index = notebook.index(tab)
+        # Prefer the next calculator, then work left; Dashboard is the fallback.
+        neighbours = tabs[index + 1:] + tabs[:index][::-1]
+        selected_tab = next(
+            (tab_id for tab_id in neighbours if tab_id != str(dashboard)),
+            str(dashboard),
+        )
+
     notebook.forget(tab)
     tab.destroy()
-    notebook.select(dashboard)
+    notebook.select(selected_tab)
 
 
 def open_tool_tab(key, title, builder):
