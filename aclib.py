@@ -1,8 +1,10 @@
 import math
 import ast
+from functools import lru_cache
 import tkinter as tk
 from scipy.integrate import quad
 from astropy.cosmology import Planck15
+from astropy import units as u
 from tkinter import ttk
 from tkinter import font
 
@@ -118,110 +120,236 @@ def redshift_to_proper_distance(z):
     Returns distance in meters.
     """
 
-    if z < 0:
-        raise ValueError("Redshift cannot be negative.")
+    if not math.isfinite(z) or z < 0:
+        raise ValueError("Enter a finite, non-negative redshift.")
+    return Planck15.comoving_distance(z).to_value("m")
 
-    c = 299792458.0  # m/s
 
-    H0 = Planck15.H0.to_value("1/s")
-    omega_m = Planck15.Om0
-    omega_lambda = Planck15.Ode0
-    omega_r = Planck15.Ogamma0 + Planck15.Onu0
-
-    def integrand(z_prime):
-        E = (
-            omega_m * (1.0 + z_prime) ** 3
-            + omega_r * (1.0 + z_prime) ** 4
-            + omega_lambda
-        ) ** 0.5
-
-        return 1.0 / E
-
+@lru_cache(maxsize=1)
+def _observable_universe_radius_m():
+    """Present particle horizon in the same cosmology, calculated only once."""
     integral = quad(
-        integrand,
-        0.0,
-        z,
-        epsabs=1e-10,
-        epsrel=1e-10
+        lambda a: Planck15.inv_efunc(1.0 / a - 1.0) / (a * a),
+        0.0, 1.0, epsabs=1e-10, epsrel=1e-10,
     )[0]
+    return 299792458.0 / Planck15.H0.to_value("1/s") * integral
 
-    distance_m = (c / H0) * integral
 
-    return distance_m
+def _redshift_results(z):
+    distance = redshift_to_proper_distance(z)
+    horizon = _observable_universe_radius_m()
+    lookback = Planck15.lookback_time(z).to_value("Gyr")
+    if not all(math.isfinite(value) for value in (distance, lookback)) or not 0 <= distance <= horizon:
+        raise ValueError("This redshift is outside the supported numerical range.")
+    # Exact light-year and parsec conversions from Astropy, not rounded globals.
+    metres_per_ly = u.lyr.to(u.m)
+    metres_per_pc = u.pc.to(u.m)
+    return {
+        "z": z, "distance_m": distance, "distance_pc": distance / metres_per_pc,
+        "distance_gly": distance / metres_per_ly / 1e9,
+        "horizon_gly": horizon / metres_per_ly / 1e9,
+        "fraction": distance / horizon, "lookback_gyr": lookback,
+    }
 
 
 def redshift_distance_UI(root):
+    """Scrollable result cards and a linear, observer-centred distance diagram."""
+    for widget in root.winfo_children():
+        widget.destroy()
+    style = ttk.Style(root)
+    style.configure("Redshift.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("Redshift.Error.TLabel", foreground="#a12622")
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(shell, width=1, height=1, highlightthickness=0,
+                         background=style.lookup("TFrame", "background") or "#eeeeee")
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+    page.bind("<Configure>", lambda event: viewport.configure(scrollregion=viewport.bbox("all")))
 
-    window = root
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
+        def fit(event):
+            width = max(1, event.width - 4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+        label.bind("<Configure>", fit)
+        return label
 
-    input_frame = tk.Frame(window)
-    input_frame.pack(pady=20)
+    wrapping_label(page, text="Explore how cosmological redshift relates to distance today.").grid(
+        row=0, column=0, sticky="ew", pady=(0, 12))
+    body = ttk.Frame(page)
+    body.grid(row=1, column=0, sticky="ew")
+    left = ttk.Frame(body)
+    left.columnconfigure(0, weight=1)
+    inputs = ttk.LabelFrame(left, text="Inputs", padding=16)
+    inputs.grid(row=0, column=0, sticky="ew")
+    inputs.columnconfigure(0, weight=1)
+    ttk.Label(inputs, text="Redshift (z):").grid(row=0, column=0, sticky="w")
+    z_entry = ttk.Entry(inputs, width=12)
+    z_entry.grid(row=1, column=0, sticky="ew", pady=(6, 12))
+    actions = ttk.Frame(inputs)
+    actions.grid(row=2, column=0, sticky="ew")
+    actions.columnconfigure(0, weight=1)
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(inputs, textvariable=error_text, style="Redshift.Error.TLabel")
+    error_label.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    error_label.grid_remove()
 
-    tk.Label(
-        input_frame,
-        text="Redshift (z):",
-        font=("Arial", 16)
-    ).grid(row=0, column=0, padx=10, pady=10)
+    results = ttk.LabelFrame(left, text="Results", padding=16)
+    results.grid(row=1, column=0, sticky="ew", pady=(16, 0))
+    results.columnconfigure(0, weight=1)
+    distance_text = tk.StringVar(master=root, value="—")
+    fraction_text = tk.StringVar(master=root, value="Calculate to show the distance.")
+    time_text = tk.StringVar(master=root, value="—")
+    details_text = tk.StringVar(master=root)
+    for row, options in enumerate((
+        {"text": "Proper distance today"},
+        {"textvariable": distance_text, "style": "Redshift.Value.TLabel"},
+        {"textvariable": fraction_text},
+        {"text": "Light-travel time"},
+        {"textvariable": time_text, "style": "Redshift.Value.TLabel"},
+    )):
+        wrapping_label(results, **options).grid(row=row, column=0, sticky="ew", pady=(4, 6))
+    expanded = wrapping_label(results, textvariable=details_text)
+    expanded.grid(row=6, column=0, sticky="ew", pady=(12, 0))
+    expanded.grid_remove()
+    details_open = False
+    last_result = None
 
-    z_entry = tk.Entry(
-        input_frame,
-        font=("Arial", 16),
-        width=15
-    )
-    z_entry.grid(row=0, column=1, padx=10, pady=10)
+    def toggle_details():
+        nonlocal details_open
+        details_open = not details_open
+        if details_open:
+            expanded.grid()
+        else:
+            expanded.grid_remove()
+        details_button.configure(text="Hide details ▴" if details_open else "Show details ▾")
 
-    result_label = tk.Label(
-        window,
-        text="",
-        font=("Arial", 15),
-        justify="left"
-    )
-    result_label.pack(pady=20)
+    details_button = ttk.Button(results, text="Show details ▾", command=toggle_details, state="disabled")
+    details_button.grid(row=5, column=0, sticky="w", pady=(10, 0))
+    view = ttk.LabelFrame(body, text="Universe view", padding=12)
+    view.columnconfigure(0, weight=1)
+    canvas = tk.Canvas(view, width=1, height=360, background="#10151e", highlightthickness=0)
+    canvas.grid(row=0, column=0, sticky="ew")
+    wrapping_label(view, text="Our observable universe — not a physical edge. The arrow shows distance today, not direction.").grid(
+        row=1, column=0, sticky="ew", pady=(10, 0))
 
-    def calculate(*args):
+    def draw(_event=None):
+        # Resizing only redraws saved results; it never repeats cosmology calculations.
+        width = canvas.winfo_width()
+        height = max(240, min(460, width))
+        if int(canvas.cget("height")) != height:
+            canvas.configure(height=height)
+        canvas.delete("all")
+        if width < 60:
+            return
+        cx, cy = width / 2, height / 2 + 8
+        radius = max(1, min(width / 2 - 20, height / 2 - 40))
+        canvas.create_oval(cx-radius, cy-radius, cx+radius, cy+radius,
+                           outline="#9ba9bd", width=2, tags="horizon")
+        horizon_label = (f"Observable radius: {last_result['horizon_gly']:.2f} billion ly"
+                         if last_result else "Observable universe")
+        canvas.create_text(cx, 20, text=horizon_label, fill="#e6edf5",
+                           width=max(1, width-20), font=("TkDefaultFont", 11))
+        if last_result is not None:
+            tip = cx + radius * last_result["fraction"]
+            if tip > cx:
+                canvas.create_line(cx, cy, tip, cy, fill="#65d6ff", width=3,
+                                   arrow=tk.LAST, arrowshape=(9, 11, 4), tags="distance_arrow")
+            canvas.create_oval(tip-3, cy-3, tip+3, cy+3, fill="#65d6ff", outline="")
+            canvas.create_text(tip, cy-18, text=f"z = {last_result['z']:g}", anchor="e",
+                               fill="#65d6ff", font=("TkDefaultFont", 11))
+        canvas.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ffe3a1", outline="")
+        canvas.create_text(cx, cy+24, text="Milky Way", fill="#ffe3a1", font=("TkDefaultFont", 11))
+    canvas.bind("<Configure>", draw)
 
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        narrow = event.width < 780
+        body.columnconfigure(0, weight=1 if narrow else 4, uniform="" if narrow else "redshift")
+        body.columnconfigure(1, weight=0 if narrow else 5, uniform="" if narrow else "redshift")
+        left.grid(row=0, column=0, sticky="new", padx=0 if narrow else (0, 16))
+        view.grid(row=1 if narrow else 0, column=0 if narrow else 1,
+                  sticky="new", pady=(16, 0) if narrow else 0)
+        # Stack actions too when the user makes the whole tab very narrow.
+        reset_button.grid(row=1 if event.width < 400 else 0,
+                          column=0 if event.width < 400 else 1,
+                          sticky="ew", padx=0 if event.width < 400 else (8, 0),
+                          pady=(8, 0) if event.width < 400 else 0)
+    viewport.bind("<Configure>", resize_page)
+
+    def clear_results():
+        nonlocal last_result, details_open
+        last_result = None
+        details_open = False
+        distance_text.set("—")
+        time_text.set("—")
+        fraction_text.set("Calculate to show the distance.")
+        details_text.set("")
+        expanded.grid_remove()
+        details_button.configure(state="disabled", text="Show details ▾")
+        draw()
+
+    def calculate(_event=None):
+        nonlocal last_result
         try:
-            z = float(z_entry.get())
+            data = _redshift_results(float(z_entry.get()))
+        except (ValueError, ArithmeticError):
+            clear_results()
+            error_text.set("Enter a finite, non-negative redshift within the numerical range.")
+            error_label.grid()
+            return
+        error_text.set("")
+        error_label.grid_remove()
+        last_result = data
+        distance_text.set(f"{data['distance_gly']:,.4g} billion ly")
+        fraction_text.set(f"{data['fraction']:.1%} of the observable radius")
+        time_text.set(f"{data['lookback_gyr']:,.4g} billion years")
+        details_text.set(
+            f"Redshift: z = {data['z']:g}\n\n"
+            f"Distance today:\n{data['distance_pc']/1e6:,.3f} Mpc\n"
+            f"{data['distance_pc']:.6e} pc\n{data['distance_m']:.6e} m\n\n"
+            f"Observable radius: {data['horizon_gly']:.2f} billion ly\n"
+            "Model: Planck15 (flat ΛCDM).\n"
+            "Distance today is comoving distance; it is not light-travel time × c."
+        )
+        details_button.configure(state="normal")
+        draw()
 
-            if z < 0:
-                raise ValueError
+    def reset():
+        z_entry.delete(0, tk.END)
+        error_text.set("")
+        error_label.grid_remove()
+        clear_results()
+        viewport.yview_moveto(0)
+        z_entry.focus_set()
 
-            distance_m = redshift_to_proper_distance(z)
-
-            distance_pc = distance_m / psc
-            distance_kpc = distance_pc / 1e3
-            distance_mpc = distance_pc / 1e6
-            distance_ly = distance_m / ly
-
-            result_label.config(
-                text=(
-                    f"Redshift: z = {z:g}\n\n"
-                    f"Proper distance today:\n"
-                    f"{distance_mpc:,.3f} Mpc\n"
-                    f"{distance_ly / 1e9:,.3f} billion ly\n\n"
-                    f"Distance in parsecs:\n"
-                    f"{distance_pc:,.3e} pc\n\n"
-                    f"Distance in meters:\n"
-                    f"{distance_m:,.3e} m"
-                )
-            )
-
-        except ValueError:
-            result_label.config(
-                text="Please enter a valid non-negative redshift."
-            )
-
-    ttk.Button(
-        window,
-        text="Calculate",
-        command=calculate
-    ).pack(pady=10)
-
+    ttk.Button(actions, text="Calculate & Draw", command=calculate).grid(row=0, column=0, sticky="ew")
+    reset_button = ttk.Button(actions, text="Reset", command=reset)
     z_entry.bind("<Return>", calculate)
-    z_entry.focus()
+    z_entry.bind("<KP_Enter>", calculate)
 
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
 
-
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page, add="+")
+        for child in widget.winfo_children():
+            bind_scrolling(child)
+    bind_scrolling(viewport)
+    z_entry.focus_set()
 
 
 def draw_central_body(canvas, cx, cy, body_radius_m,  scale, color, min_px=4, max_px=160):
