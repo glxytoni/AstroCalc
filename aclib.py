@@ -267,8 +267,24 @@ def redshift_distance_UI(root):
             canvas.create_oval(tip-3, cy-3, tip+3, cy+3, fill="#65d6ff", outline="")
             canvas.create_text(tip, cy-18, text=f"z = {last_result['z']:g}", anchor="e",
                                fill="#65d6ff", font=("TkDefaultFont", 11))
+            distance_ly = last_result["distance_gly"] * 1e9
+            if distance_ly >= 1e9:
+                distance_label = f"{distance_ly / 1e9:,.4g} billion ly"
+            elif distance_ly >= 1e6:
+                distance_label = f"{distance_ly / 1e6:,.4g} million ly"
+            else:
+                distance_label = f"{distance_ly:,.4g} ly"
+            label = canvas.create_text(
+                (cx+tip)/2, cy+14, text=distance_label, anchor="n",
+                fill="#65d6ff", font=("TkDefaultFont", 11),
+                width=max(1, width-24), tags="distance_label",
+            )
+            # Keep the caption inside the canvas, even near the horizon.
+            x1, _, x2, _ = canvas.bbox(label)
+            canvas.move(label, max(0, 12-x1) - max(0, x2-(width-12)), 0)
         canvas.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ffe3a1", outline="")
-        canvas.create_text(cx, cy+24, text="Milky Way", fill="#ffe3a1", font=("TkDefaultFont", 11))
+        canvas.create_text(cx-12, cy, text="Milky Way", anchor="e",
+                           fill="#ffe3a1", font=("TkDefaultFont", 11))
     canvas.bind("<Configure>", draw)
 
     def resize_page(event):
@@ -2906,196 +2922,603 @@ def hohmann_transfer_UI2(root):
 
 
 
+def _rocket_engine_reference(engine, environment, blend_percent=50.0):
+    """Select a fixed endpoint or an explicitly assumed linear blend of both."""
+    if environment == "Estimated ascent":
+        if not engine or not all(key in engine for key in ("Atmosphere", "Vacuum")):
+            raise ValueError("Estimated ascent requires a preset with both sea-level and vacuum data.")
+        if not math.isfinite(blend_percent) or not 0 <= blend_percent <= 100:
+            raise ValueError("Ascent blend must be a finite percentage from 0 to 100.")
+        sea, vacuum = engine["Atmosphere"], engine["Vacuum"]
+        fraction = blend_percent / 100
+        return (sea[0] + fraction * (vacuum[0] - sea[0]),
+                sea[1] + fraction * (vacuum[1] - sea[1]),
+                f"Estimated ascent, {blend_percent:g}% toward vacuum (assumed blend)")
+    if not engine:
+        return None
+    if environment not in engine:
+        raise ValueError("no atmospheric reference for this engine; select Vacuum or Custom.")
+    return engine[environment]
+
+
+def calculate_rocket_stages(stages, payload_t=0.0):
+    """Ideal sequential staging; masses in tonnes, thrust in kN, Isp in seconds.
+
+    Stage 1 burns first. Each stage's masses exclude payload and other stages.
+    Spent dry mass is discarded before the next stage; payload is retained.
+    """
+    g0 = 9.80665
+    if not math.isfinite(payload_t) or payload_t < 0:
+        raise ValueError("Payload must be finite and at least zero.")
+    if not stages:
+        raise ValueError("Add at least one stage.")
+    clean = []
+    for index, stage in enumerate(stages, 1):
+        wet, dry, isp = (stage[key] for key in ("wet_t", "dry_t", "isp"))
+        thrust = stage.get("thrust_kn")
+        if not all(math.isfinite(v) and v > 0 for v in (wet, dry, isp)):
+            raise ValueError(f"Stage {index}: wet mass, dry mass and Isp must be finite and positive.")
+        if dry >= wet:
+            raise ValueError(f"Stage {index}: dry mass must be less than wet mass.")
+        if thrust is not None and (not math.isfinite(thrust) or thrust <= 0):
+            raise ValueError(f"Stage {index}: thrust must be positive, or left blank.")
+        clean.append(dict(wet_t=wet, dry_t=dry, isp=isp, thrust_kn=thrust))
+    results = []
+    mass_above = payload_t
+    for index in range(len(clean) - 1, -1, -1):
+        stage = clean[index]
+        wet, dry, isp = (stage[key] for key in ("wet_t", "dry_t", "isp"))
+        m0, mf = wet + mass_above, dry + mass_above
+        propellant = wet - dry
+        exhaust_velocity = isp * g0
+        delta_v = exhaust_velocity * math.log1p(propellant / mf)
+        burn_time = start_twr = end_twr = mass_flow = None
+        if stage["thrust_kn"] is not None:
+            thrust = stage["thrust_kn"]
+            # kN / tonnes is m/s²; keep these units to avoid unnecessary scaling.
+            start_twr = (thrust / m0) / g0
+            end_twr = (thrust / mf) / g0
+            mass_flow = (thrust / exhaust_velocity) * 1000
+            burn_time = (propellant / thrust) * exhaust_velocity
+        values = (m0, mf, delta_v, mass_flow, burn_time, start_twr, end_twr)
+        if any(v is not None and not math.isfinite(v) for v in values):
+            raise ValueError(f"Stage {index+1}: values exceed the supported numerical range.")
+        results.append(dict(
+            index=index+1, delta_v=delta_v, propellant_t=propellant,
+            initial_mass_t=m0, final_mass_t=mf, mass_ratio=m0/mf,
+            burn_time=burn_time, start_twr=start_twr, end_twr=end_twr,
+            mass_flow=mass_flow,
+        ))
+        mass_above = m0
+    results.reverse()
+    total_delta_v = math.fsum(stage["delta_v"] for stage in results)
+    total_burn_time = (math.fsum(stage["burn_time"] for stage in results)
+                       if all(stage["burn_time"] is not None for stage in results) else None)
+    if not math.isfinite(total_delta_v) or (total_burn_time is not None and not math.isfinite(total_burn_time)):
+        raise ValueError("Totals exceed the supported numerical range.")
+    return dict(
+        stages=results, total_delta_v=total_delta_v, total_burn_time=total_burn_time,
+        launch_mass_t=mass_above, payload_t=payload_t, launch_twr=results[0]["start_twr"],
+    )
+
+
 def rocket_deltaV_UI5(root):
-    # Clear old widgets except menus/buttons
+    """UI 2.0: scrollable stage cards, explicit payload and optional thrust."""
     for widget in root.winfo_children():
-        if widget.winfo_class() not in ["Menu", "Button"]:
-            widget.destroy()
+        widget.destroy()
+    style = ttk.Style(root)
+    style.configure("Rocket.Value.TLabel", font=("TkDefaultFont", 16, "bold"))
+    style.configure("Rocket.Error.TLabel", foreground="#a12622")
+    shell = ttk.Frame(root)
+    shell.pack(fill=tk.BOTH, expand=True)
+    shell.columnconfigure(0, weight=1)
+    shell.rowconfigure(0, weight=1)
+    viewport = tk.Canvas(shell, width=1, height=1, highlightthickness=0,
+                         background=style.lookup("TFrame", "background") or "#eeeeee")
+    viewport.grid(row=0, column=0, sticky="nsew")
+    scrollbar = ttk.Scrollbar(shell, orient="vertical", command=viewport.yview)
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    viewport.configure(yscrollcommand=scrollbar.set)
+    page = ttk.Frame(viewport, padding=(4, 4, 16, 16))
+    page.columnconfigure(0, weight=1)
+    page_item = viewport.create_window(0, 0, window=page, anchor="nw")
+    page.bind("<Configure>", lambda event: viewport.configure(scrollregion=viewport.bbox("all")))
 
-    g0 = 9.80665  # m/s²
+    def wrapping_label(parent, **options):
+        label = ttk.Label(parent, width=1, wraplength=1, justify=tk.LEFT, **options)
+        def fit(event):
+            width = max(1, event.width-4)
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+        label.bind("<Configure>", fit)
+        return label
 
-    # --- Engine Isp presets ---
-    isp_presets = {
-        "Custom": "",
-        "F-1 (263 s)": 263,
-        "RS-25 (452 s)": 452,
-        "J-2 (421 s)": 421,
-        "RL10 (465 s)": 465,
-        "Merlin 1D (311 s)": 311,
-        "Raptor (350 s)": 350,
-        "Hypergolic (320 s)": 320,
-        "Vacuum Isp (380 s)": 380,
+    def scroll_page(event):
+        if viewport.yview() != (0.0, 1.0):
+            up = getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4
+            viewport.yview_scroll(-3 if up else 3, "units")
+            return "break"
+
+    def bind_scrolling(widget):
+        for event_name in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(event_name, scroll_page)
+        for child in widget.winfo_children():
+            bind_scrolling(child)
+
+    wrapping_label(page, text="Build your rocket from bottom to top. Stage 1 burns first.").grid(
+        row=0, column=0, sticky="ew", pady=(0, 12))
+    setup = ttk.LabelFrame(page, text="Rocket setup", padding=16)
+    setup.grid(row=1, column=0, sticky="ew")
+    setup.columnconfigure(0, weight=1)
+    ttk.Label(setup, text="Payload [t]").grid(row=0, column=0, sticky="w")
+    payload_var = tk.StringVar(master=root, value="0")
+    payload_entry = ttk.Entry(setup, textvariable=payload_var, width=14)
+    payload_entry.grid(row=1, column=0, sticky="ew", pady=(6, 10))
+    earth_check = tk.BooleanVar(master=root, value=True)
+    ttk.Checkbutton(setup, text="Earth liftoff check", variable=earth_check).grid(
+        row=2, column=0, sticky="w")
+    wrapping_label(setup, text=(
+        "Payload is carried by every stage. Wet mass includes propellant; dry mass excludes it. "
+        "Enter each stage's own masses only — not payload or other stages. "
+        "The liftoff check applies only to stage 1."
+    )).grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    stage_container = ttk.Frame(page)
+    stage_container.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+    stage_container.columnconfigure(0, weight=1)
+    stages = []
+    presets = {
+        "Custom": None, "F-1": 263, "RS-25": 452,
+        "J-2": 421, "RL10B-2": 465, "Merlin 1D": 311,
+        "Raptor (350 s)": 350, "Hypergolic (320 s)": 320, "Vacuum Isp (380 s)": 380,
     }
+    # Per-engine (thrust kN, Isp seconds, reference); approximate fixed endpoints.
+    # Missing atmosphere entries are intentionally unsupported, not extrapolated.
+    # F-1: https://ntrs.nasa.gov/api/citations/20040001677/downloads/20040001677.pdf
+    # RS-25: https://ntrs.nasa.gov/api/citations/20150016518/downloads/20150016518.pdf
+    # J-2: https://ntrs.nasa.gov/api/citations/20240002641/downloads/02-Systems_rev3.pdf
+    # RL10: https://www.nasa.gov/reference/space-launch-system-rl10-engine/
+    # Merlin: https://bulletin.incas.ro/files/alili_kaddouri_mokadem_alami__vol_16_iss_1.pdf
+    # RS-25 SL: https://www.l3harris.com/all-capabilities/rs-25-engine
+    # Merlin SL thrust: https://www.spacex.com/assets/media/falcon-users-guide-2025-05-09.pdf
+    # Merlin SL Isp: https://www.sjsu.edu/ae/docs/project-thesis/Anton%20Kulinich-S24.pdf
+    engine_thrusts = {
+        "F-1": {"Atmosphere": (6770.0, 263, "F-1, sea-level reference"),
+                "Vacuum": (7776.0, 295.3, "F-1, vacuum reference")},
+        "RS-25": {"Atmosphere": (1859.4, 366, "RS-25, sea-level reference"),
+                  "Vacuum": (2277.0, 452, "RS-25, vacuum / 109% reference")},
+        "J-2": {"Vacuum": (1023.1, 421, "J-2, vacuum / 230,000 lbf reference")},
+        "RL10B-2": {"Vacuum": (110.0, 465, "RL10B-2, vacuum reference")},
+        "Merlin 1D": {"Atmosphere": (845.0, 282, "Merlin 1D, sea-level reference"),
+                      "Vacuum": (914.0, 311, "Merlin 1D, vacuum reference")},
+    }
+    actions = ttk.Frame(page)
+    actions.grid(row=3, column=0, sticky="ew", pady=16)
+    for column in range(3):
+        actions.columnconfigure(column, weight=1)
+    error_text = tk.StringVar(master=root)
+    error_label = wrapping_label(setup, textvariable=error_text, style="Rocket.Error.TLabel")
+    error_label.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+    error_label.grid_remove()
+    results = ttk.LabelFrame(page, text="Results", padding=16)
+    results.grid(row=5, column=0, sticky="ew")
+    results.columnconfigure(0, weight=1)
+    wrapping_label(results, text="Total ideal ΔV").grid(row=0, column=0, sticky="ew")
+    total_text = tk.StringVar(master=root, value="—")
+    wrapping_label(results, textvariable=total_text, style="Rocket.Value.TLabel").grid(
+        row=1, column=0, sticky="ew", pady=(6, 10))
+    summary_text = tk.StringVar(master=root, value="Enter your rocket, then calculate.")
+    wrapping_label(results, textvariable=summary_text).grid(row=2, column=0, sticky="ew")
+    warning_text = tk.StringVar(master=root)
+    warning_label = wrapping_label(results, textvariable=warning_text, style="Rocket.Error.TLabel")
+    warning_label.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    warning_label.grid_remove()
+    bar = tk.Canvas(results, width=1, height=28, highlightthickness=0,
+                    background=style.lookup("TFrame", "background") or "#eeeeee")
+    bar.grid(row=4, column=0, sticky="ew", pady=(14, 4))
+    stage_results = ttk.Frame(results)
+    stage_results.grid(row=5, column=0, sticky="ew")
+    stage_results.columnconfigure(0, weight=1)
+    details_text = tk.StringVar(master=root)
+    details = wrapping_label(results, textvariable=details_text)
+    details.grid(row=7, column=0, sticky="ew", pady=(12, 0))
+    details.grid_remove()
+    expanded = False
+    last_result = None
+    colors = ("#2868b2", "#98651a", "#2f805b", "#91528d", "#a04b3b")
 
-    def calculate(*args):
-        total_delta_v = 0.0
-        total_burn_time = 0.0
-        results = []
+    def draw_bar(_event=None):
+        bar.delete("all")
+        if not last_result or last_result["total_delta_v"] <= 0:
+            return
+        width = bar.winfo_width()
+        x = 0
+        for index, stage in enumerate(last_result["stages"]):
+            right = x + width * stage["delta_v"] / last_result["total_delta_v"]
+            bar.create_rectangle(x, 0, right, 28, fill=colors[index % len(colors)], outline="")
+            if right-x >= 32:
+                bar.create_text((x+right)/2, 14, text=str(index+1), fill="white")
+            x = right
+    bar.bind("<Configure>", draw_bar)
 
-        try:
-            stages = []
-            for i in range(num_stages):
-                wet_s = wet_entries[i].get().strip()
-                dry_s = dry_entries[i].get().strip()
-                isp_s = isp_entries[i].get().strip()
-                thrust_s = thrust_entries[i].get().strip()
+    def toggle_details():
+        nonlocal expanded
+        expanded = not expanded
+        if expanded:
+            details.grid()
+        else:
+            details.grid_remove()
+        details_button.configure(text="Hide details ▴" if expanded else "Show details ▾")
+    details_button = ttk.Button(results, text="Show details ▾", command=toggle_details, state="disabled")
+    details_button.grid(row=6, column=0, sticky="w", pady=(12, 0))
 
-                # Skip blank rows
-                if wet_s == dry_s == isp_s == thrust_s == "":
-                    continue
+    def invalidate(*_args):
+        nonlocal last_result, expanded
+        last_result = None
+        expanded = False
+        total_text.set("—")
+        summary_text.set("Inputs changed — calculate to update results.")
+        warning_text.set("")
+        warning_label.grid_remove()
+        error_label.grid_remove()
+        error_text.set("")
+        details_text.set("")
+        details.grid_remove()
+        details_button.configure(state="disabled", text="Show details ▾")
+        for widget in stage_results.winfo_children():
+            widget.destroy()
+        draw_bar()
 
-                # Must fill all fields if one is filled
-                if "" in (wet_s, dry_s, isp_s, thrust_s):
-                    raise ValueError(f"Stage {i+1}: fill all fields or leave blank")
+    def layout_stages(width):
+        narrow = width < 620
+        for stage in stages:
+            for index, cell in enumerate(stage["cells"]):
+                cell.grid(row=index if narrow else index//2, column=0 if narrow else index % 2,
+                          sticky="ew", padx=(0, 0 if narrow or index % 2 else 16), pady=6)
+            stage["fields"].columnconfigure(1, weight=0 if narrow else 1)
+        for index, button in enumerate(action_buttons):
+            button.grid(row=index if width < 480 else 0, column=0 if width < 480 else index,
+                        columnspan=3 if width < 480 else 1, sticky="ew", padx=4, pady=4)
 
-                wet_t = float(wet_s)
-                dry_t = float(dry_s)
-                isp = float(isp_s)
-                thrust_kn = float(thrust_s)
+    def resize_page(event):
+        viewport.itemconfigure(page_item, width=max(1, event.width))
+        layout_stages(event.width)
+    viewport.bind("<Configure>", resize_page)
 
-                if wet_t <= 0 or dry_t <= 0 or isp <= 0 or thrust_kn <= 0:
-                    raise ValueError(f"Stage {i+1}: all values must be > 0")
-                if dry_t >= wet_t:
-                    raise ValueError(f"Stage {i+1}: dry mass must be < wet mass")
+    def renumber():
+        for index, stage in enumerate(stages):
+            stage["card"].configure(text=f"Stage {index+1}" + (" — burns first" if index == 0 else ""))
+            stage["card"].grid(row=index, column=0, sticky="ew", pady=(12, 0))
+            stage["remove"].configure(state="normal" if len(stages) > 1 else "disabled")
 
-                stages.append({
-                    "index": i + 1,
-                    "wet_kg": wet_t * 1000,
-                    "dry_kg": dry_t * 1000,
-                    "isp": isp,
-                    "thrust_n": thrust_kn * 1000,
-                })
+    def remove_stage(stage):
+        if len(stages) == 1:
+            return
+        stages.remove(stage)
+        stage["card"].destroy()
+        renumber()
+        invalidate()
 
-            if not stages:
-                result_label.config(text="No stages entered.")
+    def add_stage():
+        card = ttk.LabelFrame(stage_container, padding=16)
+        card.columnconfigure(0, weight=1)
+        stage = {"card": card, "vars": {}, "entries": {}, "cells": [],
+                 "updating_engine": False, "automatic_thrust": False}
+        header = ttk.Frame(card)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        preset_var = tk.StringVar(master=root, value="Custom")
+        ttk.Label(header, text="Engine / Isp preset").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        preset = ttk.Combobox(header, textvariable=preset_var, values=tuple(presets),
+                              state="readonly", width=12)
+        preset.grid(row=1, column=0, sticky="ew")
+        remove = ttk.Button(header, text="Remove", command=lambda: remove_stage(stage))
+        remove.grid(row=1, column=1, padx=(10, 0))
+        stage.update(remove=remove, preset=preset, preset_var=preset_var)
+        count_var = tk.StringVar(master=root, value="1")
+        count_row = ttk.Frame(header)
+        count_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Label(count_row, text="Engines (1–30):").grid(row=0, column=0, padx=(0, 10))
+        count_box = ttk.Spinbox(count_row, from_=1, to=30, textvariable=count_var,
+                                width=4, state="disabled", wrap=False)
+        count_box.grid(row=0, column=1)
+        environment = tk.StringVar(master=root, value="Atmosphere" if not stages else "Vacuum")
+        environment_row = ttk.Frame(header)
+        environment_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        environment_row.columnconfigure(0, weight=1)
+        ttk.Label(environment_row, text="Performance conditions").grid(row=0, column=0, sticky="w")
+        environment_box = ttk.Combobox(environment_row, textvariable=environment,
+                                       values=("Atmosphere", "Vacuum", "Estimated ascent"), state="readonly", width=12)
+        environment_box.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        blend_var = tk.StringVar(master=root, value="50")
+        blend_row = ttk.Frame(environment_row)
+        blend_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        blend_row.columnconfigure(0, weight=1)
+        wrapping_label(blend_row, text="Blend toward vacuum [%] — 0 = sea level, 100 = vacuum").grid(
+            row=0, column=0, sticky="ew")
+        blend_box = ttk.Spinbox(blend_row, from_=0, to=100, increment=5,
+                                textvariable=blend_var, width=8)
+        blend_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        blend_row.grid_remove()
+        engine_note = tk.StringVar(master=root, value="Custom: enter total stage thrust below, or leave it blank.")
+        wrapping_label(header, textvariable=engine_note).grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        stage.update(engine_count=count_var, count_box=count_box, engine_note=engine_note)
+        stage.update(environment=environment, environment_box=environment_box)
+        stage.update(blend=blend_var, blend_box=blend_box, blend_row=blend_row)
+        fields = ttk.Frame(card)
+        fields.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        fields.columnconfigure(0, weight=1, uniform="fields")
+        fields.columnconfigure(1, weight=1, uniform="fields")
+        stage["fields"] = fields
+        for key, label in (("wet_t", "Wet mass [t]"), ("dry_t", "Dry mass [t]"),
+                           ("isp", "Specific impulse [s]"), ("thrust_kn", "Total stage thrust [kN] — optional")):
+            cell = ttk.Frame(fields)
+            cell.columnconfigure(0, weight=1)
+            wrapping_label(cell, text=label).grid(row=0, column=0, sticky="ew")
+            var = tk.StringVar(master=root)
+            entry = ttk.Entry(cell, textvariable=var, width=12)
+            entry.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+            entry.bind("<Return>", calculate)
+            entry.bind("<KP_Enter>", calculate)
+            var.trace_add("write", invalidate)
+            stage["vars"][key], stage["entries"][key] = var, entry
+            stage["cells"].append(cell)
+        def read_engine_count():
+            text = count_var.get().strip()
+            if not text.isdecimal() or not 1 <= int(text) <= 30:
+                raise ValueError("Engine count must be a whole number from 1 to 30.")
+            return int(text)
+
+        def read_reference():
+            try:
+                blend = float(blend_var.get()) if environment.get() == "Estimated ascent" else 50.0
+            except ValueError:
+                raise ValueError("Ascent blend must be a finite percentage from 0 to 100.") from None
+            return _rocket_engine_reference(engine_thrusts.get(preset_var.get()), environment.get(), blend)
+
+        stage["read_reference"] = read_reference
+
+        def update_engine_thrust(*_args):
+            invalidate()
+            if environment.get() == "Estimated ascent":
+                blend_row.grid()
+            else:
+                blend_row.grid_remove()
+            engine = engine_thrusts.get(preset_var.get())
+            if engine is None:
+                stage["automatic_thrust"] = False
+                count_box.configure(state="disabled")
+                engine_note.set("Custom: enter Isp and total thrust for the selected conditions; values are not converted."
+                                if preset_var.get() == "Custom" else
+                                "Isp-only preset: conditions are not converted. Enter matching Isp / thrust manually.")
+                if environment.get() == "Estimated ascent":
+                    engine_note.set("Estimated ascent requires a preset with both sea-level and vacuum data.")
                 return
+            stage["automatic_thrust"] = True
+            count_box.configure(state="readonly")
+            stage["updating_engine"] = True
+            try:
+                try:
+                    selected = read_reference()
+                except ValueError as exc:
+                    stage["vars"]["isp"].set("")
+                    stage["vars"]["thrust_kn"].set("")
+                    engine_note.set(str(exc))
+                    return
+                try:
+                    count = read_engine_count()
+                except ValueError as exc:
+                    stage["vars"]["thrust_kn"].set("")
+                    engine_note.set(str(exc))
+                    return
+                per_engine, isp, reference = selected
+                total = count * per_engine
+                stage["vars"]["isp"].set(f"{isp:.12g}")
+                stage["vars"]["thrust_kn"].set(f"{total:.12g}")
+                engine_note.set(f"{count} × {per_engine:,.6g} kN = {total:,.6g} kN\n"
+                                f"{reference}. Engine mass is not added automatically.")
+                if environment.get() == "Estimated ascent":
+                    sea, vacuum = engine["Atmosphere"], engine["Vacuum"]
+                    engine_note.set(
+                        f"Per engine — sea level → vacuum:\n"
+                        f"Thrust: {sea[0]:,.6g} → {vacuum[0]:,.6g} kN; used: {per_engine:,.6g} kN\n"
+                        f"Isp: {sea[1]:g} → {vacuum[1]:g} s; used: {isp:,.6g} s\n"
+                        f"{count} engines: {total:,.6g} kN total used\n"
+                        f"{reference}. No gravity/drag losses or trajectory simulation. "
+                        "Engine mass is not added automatically."
+                    )
+            finally:
+                stage["updating_engine"] = False
 
-            # ---- Stage 1 = bottommost ----
-            n = len(stages)
-            mass_above_list = []
-            for i in range(n):
-                mass_above = sum(stages[j]["wet_kg"] for j in range(i + 1, n))
-                mass_above_list.append(mass_above)
+        def select_preset(_event=None):
+            value = presets[preset_var.get()]
+            stage["updating_engine"] = True
+            try:
+                if value is not None:
+                    stage["vars"]["isp"].set(str(value))
+                    if preset_var.get() not in engine_thrusts and stage["automatic_thrust"]:
+                        # Do not carry another engine's automatic thrust into an Isp-only preset.
+                        stage["vars"]["thrust_kn"].set("")
+            finally:
+                stage["updating_engine"] = False
+            update_engine_thrust()
+        preset.bind("<<ComboboxSelected>>", select_preset)
+        count_var.trace_add("write", update_engine_thrust)
+        environment.trace_add("write", update_engine_thrust)
+        blend_var.trace_add("write", update_engine_thrust)
+        blend_box.bind("<Return>", calculate)
+        blend_box.bind("<KP_Enter>", calculate)
+        count_box.bind("<Return>", calculate)
+        count_box.bind("<KP_Enter>", calculate)
+        stage["read_engine_count"] = read_engine_count
+        # Editing Isp or thrust opts out of automatic engine scaling.
+        def sync_preset(*_args):
+            if stage["updating_engine"]:
+                return
+            selected = presets[preset_var.get()]
+            try:
+                reference = read_reference()
+            except ValueError:
+                reference = None
+            if reference is not None:
+                selected = reference[1]
+            try:
+                entered = float(stage["vars"]["isp"].get())
+            except ValueError:
+                entered = None
+            thrust_changed = preset_var.get() in engine_thrusts and reference is None
+            if reference is not None:
+                try:
+                    expected = reference[0] * read_engine_count()
+                    thrust_changed = not math.isclose(float(stage["vars"]["thrust_kn"].get()), expected,
+                                                      rel_tol=1e-10)
+                except ValueError:
+                    thrust_changed = True
+            isp_changed = entered is None or (selected is not None and
+                                               not math.isclose(entered, selected, rel_tol=1e-10))
+            if selected is not None and (isp_changed or thrust_changed):
+                preset_var.set("Custom")
+                update_engine_thrust()
+        stage["vars"]["isp"].trace_add("write", sync_preset)
+        stage["vars"]["thrust_kn"].trace_add("write", sync_preset)
+        stages.append(stage)
+        renumber()
+        layout_stages(viewport.winfo_width())
+        bind_scrolling(card)
+        update_engine_thrust()
+        stage["entries"]["wet_t"].focus_set()
+        return stage
 
-            total_launch_mass = sum(st["wet_kg"] for st in stages)
-            total_launch_thrust = stages[0]["thrust_n"]
-            total_launch_twr = total_launch_thrust / (total_launch_mass * g0)
-
-            for i, st in enumerate(stages):
-                wet = st["wet_kg"]
-                dry = st["dry_kg"]
-                isp = st["isp"]
-                thrust = st["thrust_n"]
-
-                mass_above = mass_above_list[i]
-                m0 = wet + mass_above
-                mf = dry + mass_above
-
-                delta_v = isp * g0 * math.log(m0 / mf)
-
-                mdot = thrust / (isp * g0)
-                propellant_mass = wet - dry
-                burn_time = propellant_mass / mdot
-
-                twr = thrust / (m0 * g0)
-
-                results.append((st["index"], delta_v, burn_time, twr))
-                total_delta_v += delta_v
-                total_burn_time += burn_time
-
-        except ValueError as e:
-            result_label.config(text=f"Error: {e}")
+    def calculate(_event=None):
+        nonlocal last_result
+        try:
+            try:
+                payload = float(payload_var.get())
+            except ValueError:
+                raise ValueError("Payload: enter a mass in tonnes (0 for no payload).") from None
+            parsed = []
+            for index, stage in enumerate(stages, 1):
+                try:
+                    stage["read_reference"]()
+                except ValueError as exc:
+                    raise ValueError(f"Stage {index}: {exc}") from None
+                if stage["preset_var"].get() in engine_thrusts:
+                    try:
+                        stage["read_engine_count"]()
+                    except ValueError as exc:
+                        raise ValueError(f"Stage {index}: {exc}") from None
+                values = {}
+                for key, var in stage["vars"].items():
+                    text = var.get().strip()
+                    if key == "thrust_kn" and not text:
+                        values[key] = None
+                        continue
+                    try:
+                        values[key] = float(text)
+                    except ValueError:
+                        raise ValueError(f"Stage {index}: enter numeric wet mass, dry mass and Isp; thrust is optional.") from None
+                parsed.append(values)
+            data = calculate_rocket_stages(parsed, payload)
+            if stages[0]["environment"].get() == "Estimated ascent":
+                engine = engine_thrusts[stages[0]["preset_var"].get()]
+                sea_thrust = engine["Atmosphere"][0] * stages[0]["read_engine_count"]()
+                data["launch_twr"] = sea_thrust / data["launch_mass_t"] / 9.80665
+        except (ValueError, ArithmeticError) as exc:
+            invalidate()
+            error_text.set(str(exc) if isinstance(exc, ValueError) else "Values exceed the supported numerical range.")
+            error_label.grid()
+            viewport.yview_moveto(0)
             return
-        except Exception as e:
-            result_label.config(text=f"Unexpected error: {e}")
-            return
-
-        # ---- Output ----
-        out = "Multi-Stage Rocket ΔV Calculator\n"
-        out += "====================================\n"
-        out += "(Stage 1 = bottommost, burns first)\n\n"
-
-        for idx, dv, bt, twr in results:
-            warn = " ⚠️" if twr < 1.1 else ""
-            out += (
-                f"Stage {idx}: ΔV = {dv:7.1f} m/s ({dv/1000:.3f} km/s),  "
-                f"Burn = {bt:7.1f} s,  "
-                f"TWR = {twr:.2f}{warn}\n"
+        invalidate()
+        last_result = data
+        total_text.set(f"{data['total_delta_v']/1000:,.3f} km/s  ({data['total_delta_v']:,.1f} m/s)")
+        burn = ("Unavailable — enter thrust for every stage" if data["total_burn_time"] is None
+                else f"{data['total_burn_time']:,.1f} s")
+        twr = "Unavailable — enter stage 1 thrust" if data["launch_twr"] is None else f"{data['launch_twr']:.2f}"
+        summary_text.set(
+            f"Initial stack mass: {data['launch_mass_t']:,.4g} t  •  Payload: {payload:,.4g} t\n"
+            f"Total powered burn time: {burn}\nInitial stack TWR (Earth reference): {twr}"
+        )
+        if stages[0]["environment"].get() == "Estimated ascent":
+            summary_text.set(summary_text.get() + "\nLiftoff TWR above uses sea-level thrust, not the blended thrust.")
+        if earth_check.get() and data["launch_twr"] is not None:
+            if data["launch_twr"] <= 1:
+                warning_text.set("Earth liftoff: stage 1 thrust does not exceed the rocket's weight.")
+            elif data["launch_twr"] < 1.1:
+                warning_text.set("Earth liftoff: only a small thrust margin above the rocket's weight (TWR < 1.1).")
+            if stages[0]["environment"].get() == "Vacuum":
+                warning_text.set((warning_text.get() + "\n" if warning_text.get() else "") +
+                                 "This preset uses vacuum thrust; its TWR is not a sea-level liftoff prediction.")
+            if warning_text.get():
+                warning_label.grid()
+        detail_lines = []
+        for index, stage in enumerate(data["stages"]):
+            card = ttk.LabelFrame(stage_results, text=f"Stage {index+1}", padding=12)
+            card.grid(row=index, column=0, sticky="ew", pady=(10, 0))
+            card.columnconfigure(0, weight=1)
+            wrapping_label(card, text=f"{stage['delta_v']/1000:,.3f} km/s  ({stage['delta_v']:,.1f} m/s)",
+                           style="Rocket.Value.TLabel", foreground=colors[index % len(colors)]).grid(
+                               row=0, column=0, sticky="ew")
+            extra = ("Burn time / TWR: unavailable (no thrust entered)" if stage["burn_time"] is None else
+                     f"Burn time: {stage['burn_time']:,.1f} s\n"
+                     f"TWR start → end (Earth reference): {stage['start_twr']:.2f} → {stage['end_twr']:.2f}")
+            if stages[index]["environment"].get() == "Estimated ascent":
+                extra += "\nBurn time and stage TWR use fixed blended performance; TWR is not a trajectory prediction."
+            wrapping_label(card, text=f"Propellant: {stage['propellant_t']:,.4g} t\n{extra}").grid(
+                row=1, column=0, sticky="ew", pady=(6, 0))
+            detail_lines.append(
+                f"Stage {index+1}: start / end stack mass = {stage['initial_mass_t']:,.5g} / "
+                f"{stage['final_mass_t']:,.5g} t; mass ratio = {stage['mass_ratio']:.4g}"
+                + (f"; propellant flow = {stage['mass_flow']:,.5g} kg/s" if stage["mass_flow"] is not None else "")
             )
+            selection = stages[index]["preset_var"].get()
+            if selection not in engine_thrusts:
+                detail_lines.append(f"Stage {index+1} conditions: {stages[index]['environment'].get()} "
+                                    "(manual performance values; no automatic conversion)")
+            if selection in engine_thrusts:
+                detail_lines.append(f"Stage {index+1} engines ({stages[index]['environment'].get()}): {selection} × "
+                                    f"{stages[index]['engine_count'].get()}\n"
+                                    f"{stages[index]['engine_note'].get()}")
+        details_text.set("\n\n".join(detail_lines) +
+            "\n\nΔV = Isp × g₀ × ln(start mass / end mass), g₀ = 9.80665 m/s².\n"
+            "Sequential burns; each spent stage is discarded. Payload remains aboard. "
+            "Constant Isp and thrust; no gravity, drag or steering losses, coast time, boosters or crossfeed.\n\n"
+            "All TWR values use Earth standard gravity, including upper stages. "
+            "A low upper-stage TWR is not an automatic failure.\n\n"
+            "Presets use approximate fixed thrust and Isp for the selected conditions. "
+            "Atmosphere means sea level for the whole burn, not an ascent average. "
+            "Estimated ascent blends sea-level and vacuum thrust / Isp by the selected percentage; "
+            "50% is a midpoint assumption, not a measured ascent average. Stage 1 liftoff TWR still uses sea-level thrust. "
+            "No altitude, drag or throttle simulation. Vacuum thrust is not sea-level liftoff thrust. "
+            "Isp does not multiply with engine count. Thrust is the total for all engines on that stage. "
+            "Include engine mass yourself in both wet and dry stage masses."
+        )
+        details_button.configure(state="normal")
+        bind_scrolling(stage_results)
+        draw_bar()
 
-        out += "------------------------------------\n"
-        out += f"Total ΔV = {total_delta_v:7.1f} m/s ({total_delta_v/1000:.3f} km/s)\n"
-        out += f"Total Burn Time = {total_burn_time:7.1f} s\n"
-        out += f"Total Launch TWR = {total_launch_twr:.2f}\n"
+    def reset():
+        for stage in stages:
+            stage["card"].destroy()
+        stages.clear()
+        payload_var.set("0")
+        earth_check.set(True)
+        add_stage()
+        summary_text.set("Enter your rocket, then calculate.")
+        viewport.yview_moveto(0)
 
-        result_label.config(text=out)
-
-    # ---- UI layout ----
-    frame = tk.Frame(root, width=800, height=700)
-    frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-
-    title = tk.Label(frame, text="Multi-Stage Rocket ΔV Calculator", font=("Arial", 12, "bold"))
-    title.pack(pady=8)
-
-    note = tk.Label(frame, text="Enter stages bottom → top (Stage 1 = bottommost). Leave unused rows blank.")
-    note.pack()
-
-    num_stages = 5
-
-    input_frame = tk.Frame(frame)
-    input_frame.pack(pady=8, anchor="w")
-
-    header = tk.Frame(input_frame)
-    header.pack(fill=tk.X)
-    tk.Label(header, text="Stage", width=8).grid(row=0, column=0)
-    tk.Label(header, text="Wet [t]", width=12).grid(row=0, column=1)
-    tk.Label(header, text="Dry [t]", width=12).grid(row=0, column=2)
-    tk.Label(header, text="Isp [s]", width=16).grid(row=0, column=3)
-    tk.Label(header, text="Thrust [kN]", width=14).grid(row=0, column=4)
-
-    wet_entries, dry_entries, isp_entries, thrust_entries = [], [], [], []
-
-    for i in range(num_stages):
-        row = tk.Frame(input_frame)
-        row.pack(anchor="w", pady=2)
-
-        tk.Label(row, text=f"{i+1}", width=8).grid(row=0, column=0)
-        wet = tk.Entry(row, width=12); wet.grid(row=0, column=1, padx=2)
-        dry = tk.Entry(row, width=12); dry.grid(row=0, column=2, padx=2)
-
-        isp_var = tk.StringVar()
-        isp_dropdown = tk.OptionMenu(row, isp_var, *isp_presets.keys())
-        isp_dropdown.config(width=14)
-        isp_dropdown.grid(row=0, column=3, padx=2)
-
-        isp_entry = tk.Entry(row, width=8)
-        isp_entry.grid(row=0, column=3, padx=80)  # overlay entry
-        isp_entries.append(isp_entry)
-
-        def update_isp_entry(var=isp_var, entry=isp_entry):
-            val = isp_presets[var.get()]
-            entry.delete(0, tk.END)
-            if val != "":
-                entry.insert(0, str(val))
-
-        isp_var.trace_add("write", lambda *_, var=isp_var, entry=isp_entry: update_isp_entry(var, entry))
-
-        thr = tk.Entry(row, width=14); thr.grid(row=0, column=4, padx=2)
-        wet.bind("<Return>", calculate)
-        dry.bind("<Return>", calculate)
-        isp_entry.bind("<Return>", calculate)
-        thr.bind("<Return>", calculate)
-        wet_entries.append(wet)
-        dry_entries.append(dry)
-        thrust_entries.append(thr)
-
-    calc_btn = tk.Button(frame, text="Calculate ΔV and Burn Time", command=calculate)
-    calc_btn.pack(pady=10)
-
-    result_label = tk.Label(frame, justify=tk.LEFT, anchor="w")
-    result_label.pack(fill=tk.X, padx=6, pady=6)
-
-    wet_entries[0].focus()
+    action_buttons = [
+        ttk.Button(actions, text="+ Add stage", command=add_stage),
+        ttk.Button(actions, text="Calculate", command=calculate),
+        ttk.Button(actions, text="Reset", command=reset),
+    ]
+    payload_var.trace_add("write", invalidate)
+    earth_check.trace_add("write", invalidate)
+    payload_entry.bind("<Return>", calculate)
+    payload_entry.bind("<KP_Enter>", calculate)
+    add_stage()
+    summary_text.set("Enter your rocket, then calculate.")
+    bind_scrolling(viewport)
 
     def stellar_magnitude_UI(root):
         # Clear window except menu/buttons
