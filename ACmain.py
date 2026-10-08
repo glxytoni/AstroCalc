@@ -1,4 +1,5 @@
 import aclib as mfc
+import gravity_assist as ga
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -104,6 +105,10 @@ def open_orbit_visualizer():
     open_tool_tab("orbit_visualizer", "Orbit Visualizer", mfc.orbit_visualizer_UI3)
 
 
+def open_gravity_assist():
+    open_tool_tab("gravity_assist", "Gravity Assist", ga.gravity_assist_UI)
+
+
 def open_redshift_distance():
     open_tool_tab("redshift_distance", "Redshift Distance", mfc.redshift_distance_UI)
 
@@ -165,10 +170,6 @@ physics_menu.add_command(
     command=open_schwarzschild_radius
 )
 
-physics_menu.add_command(
-    label="Relativistic Speed Kinetic Energy [WIP]"
-)
-
 
 # Orbital Mechanics
 orbit_menu = tk.Menu(tools_menu, tearoff=0)
@@ -188,7 +189,8 @@ orbit_menu.add_command(
 )
 
 orbit_menu.add_command(
-    label="Patched-Conics Gravity Assist Visualizer [WIP]"
+    label="Patched-Conics Gravity Assist",
+    command=open_gravity_assist
 )
 
 orbit_menu.add_command(
@@ -286,7 +288,6 @@ categories = (
             ("Mass-Energy Calculator", open_mass_energy),
             ("Photon Energy / Spectrum", open_photon_energy_spectrum),
             ("Schwarzschild Radius", open_schwarzschild_radius),
-            ("Relativistic Speed Kinetic Energy [Coming soon]", None),
         ),
     ),
     (
@@ -296,7 +297,7 @@ categories = (
             ("Orbit Visualizer", open_orbit_visualizer),
             ("Roche Limit", open_roche_limit),
             ("Rocket DeltaV", open_rocket_dV),
-            ("Patched-Conics Gravity Assist [Coming soon]", None),
+            ("Patched-Conics Gravity Assist", open_gravity_assist),
             ("Orbit Analysis [Coming soon]", None),
         ),
     ),

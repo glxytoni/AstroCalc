@@ -14,6 +14,7 @@ Version **0.4.0** brings the available calculators into **UI 2.0**: consistent i
 - Zoom, pan, and fit controls for orbit and Hohmann-transfer diagrams.
 - A redshift-distance diagram showing distance today relative to our observable universe.
 - A rebuilt rocket calculator with payload, dynamic stages, engine counts, and estimated-ascent performance.
+- An integrated gravity-assist visualizer with outgoing velocity/direction and Sun-relative speed changes.
 - A Windows executable build with a custom AstroCalc icon.
 
 ## Calculators
@@ -33,8 +34,11 @@ The relativity and mass-energy tools prioritise conversions with magnitudes from
 - **Hohmann Transfer:** departure/arrival burns, total ΔV, transfer time, burn directions, and the highlighted transfer arc.
 - **Roche Limit:** fluid and rigid estimates, using radius in km and densities in g/cm³. Distances are measured from the primary body's centre.
 - **Rocket DeltaV:** sequential multi-stage ΔV, propellant masses, burn times, and thrust-to-weight ratios.
+- **Patched-Conics Gravity Assist:** select a planet, incoming planet-relative v∞, approach angle, closest-approach altitude, and turn direction. View the hyperbolic flyby, outgoing v∞ and angle, and the local Sun-relative speed change.
 
 Use the mouse wheel to zoom orbital diagrams, drag to pan, and **Fit orbit** to restore the view.
+
+Gravity Assist uses the same controls, with **Fit flyby**. Its angle reference is the planet's direction of travel: 0° right, 90° up, positive counter-clockwise. The input describes velocity, not the spacecraft's position. Planet-relative v∞ keeps its speed during an unpowered flyby but changes direction; Sun-relative speed can increase or decrease. The tool assumes a circular planetary orbit and does not simulate atmosphere, rings, engine burns, or a complete interplanetary mission. Reset restores the example Earth flyby.
 
 ### Stellar Astronomy
 
@@ -129,6 +133,8 @@ See the [PyInstaller documentation](https://pyinstaller.org/en/stable/usage.html
 AstroCalc/
 ├── ACmain.py      # Launcher, dashboard, menus, and tab management
 ├── aclib.py       # Calculations, visualisations, and calculator interfaces
+├── gravity_assist.py  # Shared flyby maths and the integrated calculator
+├── gravity_assist_concept.py  # Optional standalone drawing prototype
 ├── astrocalc.ico  # Windows executable icon
 └── README.md
 ```
@@ -137,7 +143,7 @@ AstroCalc/
 
 ## Not yet implemented
 
-Menu entries marked **Coming soon** or **WIP** are placeholders, including patched-conics gravity assists, a separate orbit-analysis tool, additional relativistic speed/energy tools, stellar-distance estimation, and stellar constants.
+Menu entries marked **Coming soon** or **WIP** are placeholders, including a separate orbit-analysis tool, stellar-distance estimation, and stellar constants.
 
 ## License
 
