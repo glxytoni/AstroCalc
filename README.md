@@ -38,7 +38,9 @@ The relativity and mass-energy tools prioritise conversions with magnitudes from
 
 Use the mouse wheel to zoom orbital diagrams, drag to pan, and **Fit orbit** to restore the view.
 
-Gravity Assist uses the same controls, with **Fit flyby**. Its angle reference is the planet's direction of travel: 0° left, +90° down, positive counter-clockwise. This north-side, top-down view places the Sun in the downward direction, marked by a fixed orientation arrow. The input describes velocity, not the spacecraft's position. Planet-relative v∞ keeps its speed during an unpowered flyby but changes direction; Sun-relative speed can increase or decrease. The tool assumes a circular planetary orbit and does not simulate atmosphere, rings, engine burns, or a complete interplanetary mission. Reset restores the example Earth flyby.
+Gravity Assist uses the same controls, with **Fit flyby**. Calculate opens a closer view of the extended trajectory; **Fit flyby** zooms out to include both complete drawn branches. Its angle reference is the planet's direction of travel: 0° left, +90° down, positive counter-clockwise. This north-side, top-down view places the Sun in the downward direction, marked by a fixed orientation arrow. The input describes velocity, not the spacecraft's position. Planet-relative v∞ keeps its speed during an unpowered flyby but changes direction; Sun-relative speed can increase or decrease. The tool assumes a circular planetary orbit and does not simulate atmosphere, rings, engine burns, or a complete interplanetary mission. Reset restores the example Earth flyby.
+
+**Show solar orbits** opens a separate solar-system canvas with a yellow Sun, dashed circular planetary orbits, and blue before-flyby and orange after-flyby heliocentric paths. The encounter is placed at 12 o'clock. Use the mouse wheel or **+/−** to zoom, drag to pan, and **Reset view** to recenter. Perihelion and aphelion are shown in AU; escape trajectories have no aphelion. The view updates after recalculation and clears while inputs are being edited.
 
 ### Stellar Astronomy
 

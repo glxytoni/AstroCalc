@@ -21,7 +21,8 @@ from tkinter import ttk
 G_KM = 6.6741e-20
 SUN_MU = G_KM * 1.98847e30
 AU_KM = 149597870.7
-PLOT_EXTENT = 8.0  # Endpoint distance in periapsis radii; shared with fit-to-view.
+PLOT_EXTENT = 16.0  # Draw each end this many periapsis radii from the planet.
+VIEW_EXTENT = 8.0  # Keep the default scale independent of the path's length.
 # Mass kg, radius km, approximate orbital radius AU, drawing colour.
 PLANETS = {
     'Mercury': (3.3011e23, 2439.7, 0.3871, '#a3a3a3'),
@@ -181,7 +182,7 @@ def gravity_assist_UI(root):
     navigation = ttk.Frame(view)
     navigation.grid(row=1, column=0, sticky='ew', pady=(10, 0))
     zoom_text = tk.StringVar(master=root, value='100%')
-    wrap_label(view, text='Wheel: zoom • Drag: pan\nBlue: incoming • Orange: outgoing • White: closest approach\nFinite local sketch—not the sphere-of-influence boundary.').grid(
+    wrap_label(view, text='Wheel: zoom • Drag: pan • Fit flyby: show full path\nBlue: incoming • Orange: outgoing • White: closest approach\nFinite local sketch—not the sphere-of-influence boundary.').grid(
         row=2, column=0, sticky='ew', pady=(10, 0))
     wrap_label(page, text='Ideal two-body flyby and circular planetary orbit. No atmosphere, ring-clearance assessment, burns or three-body effects. Very low passes may be physically unsafe.').grid(
         row=2, column=0, sticky='ew', pady=(12, 0))
@@ -203,6 +204,29 @@ def gravity_assist_UI(root):
     detail_label.grid_remove()
     state = {'data': None, 'points': None, 'color': '#397cff', 'name': 'Earth', 'expanded': False}
     camera = {'zoom': 1.0, 'x': 0.0, 'y': 0.0, 'drag': None}
+    solar_window = {'window': None}
+
+    def current_solar_window():
+        window = solar_window['window']
+        return window if window is not None and window.winfo_exists() else None
+
+    def show_solar_orbits():
+        if state['data'] is None:
+            return
+        from solar_orbits import SolarOrbitWindow
+        window = current_solar_window()
+        try:
+            if window is None:
+                window = SolarOrbitWindow(root, state['name'], state['data'], PLANETS, SUN_MU, AU_KM)
+                solar_window['window'] = window
+            window.deiconify()
+            window.lift()
+        except (ValueError, ArithmeticError) as exc:
+            error_text.set(f'Solar orbit view: {exc}')
+            error_label.grid()
+
+    solar_button = ttk.Button(view, text='Show solar orbits', command=show_solar_orbits, state='disabled')
+    solar_button.grid(row=3, column=0, sticky='w', pady=(12, 0))
 
     def draw(_event=None):
         width, height = canvas.winfo_width(), canvas.winfo_height()
@@ -217,7 +241,7 @@ def gravity_assist_UI(root):
             return
         if min(width, height) < 120:
             return
-        scale = (min(width, height)/2-42)/(PLOT_EXTENT*data['rp'])*camera['zoom']
+        scale = (min(width, height)/2-42)/(VIEW_EXTENT*data['rp'])*camera['zoom']
         cx, cy = width/2+camera['x'], height/2+camera['y']
         def screen(point):
             # Rotate the view 180 degrees, preserving CW/CCW and the physics frame.
@@ -268,10 +292,13 @@ def gravity_assist_UI(root):
         canvas.create_line(width-68, 38, width-68, 74, fill='#f5d06f',
                            width=2, arrow=tk.LAST, tags='sun_direction')
 
-    def fit_view():
-        camera.update(zoom=1.0, x=0.0, y=0.0, drag=None)
-        zoom_text.set('100%')
+    def reset_view(zoom=1.0):
+        camera.update(zoom=zoom, x=0.0, y=0.0, drag=None)
+        zoom_text.set(f'{zoom:.0%}')
         draw()
+
+    def fit_view():
+        reset_view(VIEW_EXTENT/PLOT_EXTENT)
 
     def zoom_at(factor, x=None, y=None):
         if state['data'] is None:
@@ -334,6 +361,10 @@ def gravity_assist_UI(root):
         error_label.grid_remove()
         detail_label.grid_remove()
         details_button.configure(state='disabled', text='Show details ▾')
+        solar_button.configure(state='disabled')
+        window = current_solar_window()
+        if window is not None:
+            window.clear()
         draw()
 
     def angle_text(vector):
@@ -382,7 +413,14 @@ def gravity_assist_UI(root):
             'Sun-frame results are local patched-encounter estimates, not velocities at infinity from the Sun. '
             f'The plotted segment extends to {PLOT_EXTENT:g} periapsis radii. No trajectory to another planet is computed.')
         details_button.configure(state='normal')
-        fit_view()
+        solar_button.configure(state='normal')
+        window = current_solar_window()
+        if window is not None:
+            try:
+                window.update_flyby(name, data)
+            except (ValueError, ArithmeticError) as exc:
+                window.clear(f'Solar orbit view: {exc}')
+        reset_view()
 
     def reset():
         for key, value in defaults.items():
