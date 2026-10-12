@@ -38,7 +38,7 @@ The relativity and mass-energy tools prioritise conversions with magnitudes from
 
 Use the mouse wheel to zoom orbital diagrams, drag to pan, and **Fit orbit** to restore the view.
 
-Gravity Assist uses the same controls, with **Fit flyby**. Its angle reference is the planet's direction of travel: 0° right, 90° up, positive counter-clockwise. The input describes velocity, not the spacecraft's position. Planet-relative v∞ keeps its speed during an unpowered flyby but changes direction; Sun-relative speed can increase or decrease. The tool assumes a circular planetary orbit and does not simulate atmosphere, rings, engine burns, or a complete interplanetary mission. Reset restores the example Earth flyby.
+Gravity Assist uses the same controls, with **Fit flyby**. Its angle reference is the planet's direction of travel: 0° left, +90° down, positive counter-clockwise. This north-side, top-down view places the Sun in the downward direction, marked by a fixed orientation arrow. The input describes velocity, not the spacecraft's position. Planet-relative v∞ keeps its speed during an unpowered flyby but changes direction; Sun-relative speed can increase or decrease. The tool assumes a circular planetary orbit and does not simulate atmosphere, rings, engine burns, or a complete interplanetary mission. Reset restores the example Earth flyby.
 
 ### Stellar Astronomy
 

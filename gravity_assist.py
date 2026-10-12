@@ -4,6 +4,7 @@ The standalone gravity_assist_concept.py also imports these mathematics.
 Units: km, seconds, km/s, degrees. +x is the planet's orbital velocity;
 positive angles are counter-clockwise. The incoming angle describes VELOCITY,
 not the direction from the planet to the approaching spacecraft.
+The north-side view renders +x left and +y down (towards the Sun).
 
 References:
 https://orbital-mechanics.space/interplanetary-maneuvers/planetary-arrival-flyby.html
@@ -20,6 +21,7 @@ from tkinter import ttk
 G_KM = 6.6741e-20
 SUN_MU = G_KM * 1.98847e30
 AU_KM = 149597870.7
+PLOT_EXTENT = 8.0  # Endpoint distance in periapsis radii; shared with fit-to-view.
 # Mass kg, radius km, approximate orbital radius AU, drawing colour.
 PLANETS = {
     'Mercury': (3.3011e23, 2439.7, 0.3871, '#a3a3a3'),
@@ -99,7 +101,7 @@ def flyby_state(flyby, nu):
     return position, velocity
 
 
-def flyby_points(flyby, extent=6.0, steps=400):
+def flyby_points(flyby, extent=PLOT_EXTENT, steps=400):
     """Sample a finite plot, not an SOI boundary or a point at infinity."""
     if extent <= 1 or steps < 2:
         raise ValueError('Plot extent must exceed periapsis; at least two steps required.')
@@ -162,7 +164,7 @@ def gravity_assist_UI(root):
                   if choices else ttk.Entry(setup, textvariable=variables[key], width=12))
         widget.grid(row=2*index+1, column=0, sticky='ew', pady=(0, 6))
         widgets[key] = widget
-    wrap_label(setup, text='0° = right, 90° = up. This is the incoming velocity direction, not the object’s position. Altitude is above the reference surface.').grid(
+    wrap_label(setup, text='0° = left, +90° = down (towards Sun). This is the incoming velocity direction, not the object’s position. Altitude is above the reference surface.').grid(
         row=10, column=0, sticky='ew', pady=(8, 0))
     actions = ttk.Frame(setup)
     actions.grid(row=11, column=0, sticky='ew', pady=(12, 0))
@@ -215,13 +217,15 @@ def gravity_assist_UI(root):
             return
         if min(width, height) < 120:
             return
-        scale = (min(width, height)/2-42)/(6*data['rp'])*camera['zoom']
+        scale = (min(width, height)/2-42)/(PLOT_EXTENT*data['rp'])*camera['zoom']
         cx, cy = width/2+camera['x'], height/2+camera['y']
         def screen(point):
-            return cx+point[0]*scale, cy-point[1]*scale
-        canvas.create_line(12, cy, width-12, cy, fill='#707d91', dash=(5, 5), arrow=tk.LAST)
-        canvas.create_text(width-12, cy+12, anchor='ne', fill='#c9d1df',
-                           text='Planet motion → 0°', font=('TkDefaultFont', 10))
+            # Rotate the view 180 degrees, preserving CW/CCW and the physics frame.
+            return cx-point[0]*scale, cy+point[1]*scale
+        canvas.create_line(width-12, cy, 12, cy, fill='#707d91', dash=(5, 5),
+                           arrow=tk.LAST, tags='planet_motion')
+        canvas.create_text(12, cy+12, anchor='nw', fill='#c9d1df',
+                           text='← Planet motion 0°', font=('TkDefaultFont', 10))
         actual_radius = data['radius_km']*scale
         radius = max(3, actual_radius)
         canvas.create_oval(cx-radius, cy-radius, cx+radius, cy+radius,
@@ -245,16 +249,24 @@ def gravity_assist_UI(root):
         # Fixed inset shows asymptotic directions separately from finite curve endpoints.
         ox, oy, length = 64, height-64, 34
         canvas.create_rectangle(6, height-110, 124, height-6, fill='#10151e', outline='#354253')
-        canvas.create_line(ox-40, oy, ox+43, oy, fill='#707d91', arrow=tk.LAST)
-        for velocity, colour in ((data['vin'], '#68d7ff'), (data['vout'], '#ffbd66')):
+        canvas.create_line(ox+43, oy, ox-40, oy, fill='#707d91', arrow=tk.LAST,
+                           tags='vinf_reference')
+        for velocity, colour, tag in ((data['vin'], '#68d7ff', 'vinf_in'),
+                                      (data['vout'], '#ffbd66', 'vinf_out')):
             vx, vy = velocity
-            canvas.create_line(ox, oy, ox+length*vx/data['vinf'], oy-length*vy/data['vinf'],
-                               fill=colour, width=2, arrow=tk.LAST)
+            canvas.create_line(ox, oy, ox-length*vx/data['vinf'], oy+length*vy/data['vinf'],
+                               fill=colour, width=2, arrow=tk.LAST, tags=tag)
         canvas.create_text(14, height-14, anchor='sw', text='v∞ directions', fill='#e6edf5',
                            font=('TkDefaultFont', 10))
         if actual_radius < 3:
             canvas.create_text(width-10, height-12, anchor='se', fill='#e6edf5',
                                text='Planet marker enlarged', font=('TkDefaultFont', 9))
+        # Fixed orientation key: direction only, not the Sun's plotted position.
+        canvas.create_rectangle(width-132, 6, width-6, 84, fill='#10151e', outline='')
+        canvas.create_text(width-14, 12, anchor='ne', fill='#e6edf5',
+                           text='Towards Sun', font=('TkDefaultFont', 10))
+        canvas.create_line(width-68, 38, width-68, 74, fill='#f5d06f',
+                           width=2, arrow=tk.LAST, tags='sun_direction')
 
     def fit_view():
         camera.update(zoom=1.0, x=0.0, y=0.0, drag=None)
@@ -364,10 +376,11 @@ def gravity_assist_UI(root):
             'Outgoing v∞ is the incoming vector rotated by ±δ.\n'
             'Sun-relative velocity = planet orbital velocity + planet-relative v∞.\n\n'
             'Angles run from −180° to +180°, measured counter-clockwise from planet motion. '
+            'North-side view: 0° points left; +90° points down, towards the Sun. '
             'The input angle orients the encounter; it is not the hyperbolic true anomaly.\n\n'
             'v∞ means the asymptotic planet-relative velocity, not the speed at a finite SOI boundary. '
             'Sun-frame results are local patched-encounter estimates, not velocities at infinity from the Sun. '
-            'The plotted segment extends to six periapsis radii. No trajectory to another planet is computed.')
+            f'The plotted segment extends to {PLOT_EXTENT:g} periapsis radii. No trajectory to another planet is computed.')
         details_button.configure(state='normal')
         fit_view()
 
