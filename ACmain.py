@@ -114,7 +114,7 @@ def open_redshift_distance():
 
 
 root = tk.Tk()
-root.title("AstroCalc 0.4.0")
+root.title("AstroCalc 0.4.1")
 root.geometry("900x700")
 root.minsize(760, 580)
 
